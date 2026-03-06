@@ -1,0 +1,251 @@
+---
+title: Spring Boot Configuration
+description: Common Spring Boot configuration patterns used across SGIVU microservices
+---
+
+This page documents the standard Spring Boot configuration patterns used throughout the SGIVU platform.
+
+## Application Identity
+
+### Application Name
+
+Every service must define its application name, which is used for service discovery and identification:
+
+<ParamField path="spring.application.name" type="string" required>
+  Unique identifier for the service in the microservices ecosystem. Used by Eureka for service registration and discovery.
+</ParamField>
+
+```yaml
+spring:
+  application:
+    name: sgivu-user
+```
+
+<Note>
+  The application name should follow the `sgivu-{service}` naming convention for consistency across the platform.
+</Note>
+
+## Server Configuration
+
+### Port Configuration
+
+Services use environment-driven port configuration with sensible defaults:
+
+<ParamField path="server.port" type="integer" required>
+  The HTTP port the service listens on. Uses the `PORT` environment variable with service-specific defaults.
+</ParamField>
+
+```yaml
+server:
+  port: ${PORT:8081}
+```
+
+<CardGroup cols={2}>
+  <Card title="Auth Service" icon="lock">
+    Default: `9000`
+  </Card>
+  <Card title="Gateway Service" icon="gateway">
+    Default: `8080`
+  </Card>
+  <Card title="User Service" icon="user">
+    Default: `8081`
+  </Card>
+  <Card title="Client Service" icon="building">
+    Default: `8082`
+  </Card>
+  <Card title="Vehicle Service" icon="car">
+    Default: `8083`
+  </Card>
+  <Card title="Purchase-Sale Service" icon="receipt">
+    Default: `8084`
+  </Card>
+  <Card title="Discovery Service" icon="compass">
+    Default: `8761`
+  </Card>
+</CardGroup>
+
+### Forward Headers Strategy
+
+Services behind proxies use the forward headers strategy to properly handle proxy headers:
+
+<ParamField path="server.forward-headers-strategy" type="string">
+  Configures how the server handles forwarded headers (X-Forwarded-*). Set to `framework` to let Spring handle them automatically.
+</ParamField>
+
+```yaml
+server:
+  forward-headers-strategy: framework
+```
+
+<Info>
+  This setting is critical for services behind the gateway or load balancers to correctly identify client IP addresses and original request URLs.
+</Info>
+
+## JPA Configuration
+
+### Open In View
+
+All data-access services disable the Open Session In View pattern:
+
+<ParamField path="spring.jpa.open-in-view" type="boolean">
+  Controls whether JPA sessions remain open during view rendering. Set to `false` in all SGIVU services to prevent lazy loading issues and improve performance.
+</ParamField>
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+```
+
+<Warning>
+  Keeping `open-in-view: false` is a best practice for REST APIs. It prevents accidental lazy loading in controllers and ensures explicit transaction boundaries.
+</Warning>
+
+### JPA Properties (Profile-Specific)
+
+Development environments enable SQL logging:
+
+```yaml
+spring:
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+```
+
+Production environments use minimal logging:
+
+```yaml
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+```
+
+## Session Management
+
+### Session Store Types
+
+SGIVU uses two session storage strategies depending on service requirements:
+
+#### Redis Sessions (Stateless Services)
+
+The **Gateway** uses Redis for distributed session management:
+
+```yaml
+spring:
+  session:
+    store-type: redis
+    timeout: 1h
+    redis:
+      namespace: spring:session:sgivu-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:sgivu-redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+```
+
+<ParamField path="spring.session.store-type" type="string">
+  Session storage mechanism. Use `redis` for distributed sessions across gateway instances.
+</ParamField>
+
+<ParamField path="spring.session.redis.namespace" type="string">
+  Redis key prefix for session data. Prevents key collisions when multiple services share the same Redis instance.
+</ParamField>
+
+#### JDBC Sessions (Stateful Services)
+
+The **Auth Service** uses database-backed sessions:
+
+```yaml
+spring:
+  session:
+    store-type: jdbc
+    jdbc:
+      initialize-schema: never
+      table-name: SPRING_SESSION
+      cleanup-cron: 0 */15 * * * *
+      flush-mode: on_save
+      save-mode: on_get_attribute
+```
+
+<ParamField path="spring.session.jdbc.initialize-schema" type="string">
+  Controls session table creation. Set to `never` since Flyway manages the schema.
+</ParamField>
+
+<ParamField path="spring.session.jdbc.cleanup-cron" type="string">
+  Cron expression for expired session cleanup. Runs every 15 minutes by default.
+</ParamField>
+
+<Accordion title="Session Storage Decision Guide">
+  **Use Redis when:**
+  - Service requires horizontal scaling
+  - Sessions are lightweight and temporary
+  - Service is stateless (like the gateway)
+
+  **Use JDBC when:**
+  - Service already has database access
+  - Sessions contain critical data
+  - Service requires session persistence across restarts
+</Accordion>
+
+## API Documentation (SpringDoc)
+
+All services use SpringDoc OpenAPI 3 with centralized documentation routing:
+
+<ParamField path="springdoc.swagger-ui.url" type="string">
+  Location of the OpenAPI JSON specification for this service.
+</ParamField>
+
+<ParamField path="springdoc.swagger-ui.configUrl" type="string">
+  Location of the Swagger UI configuration.
+</ParamField>
+
+### Service-Specific Configurations
+
+```yaml
+# Auth Service
+springdoc:
+  swagger-ui:
+    url: /docs/auth/v3/api-docs
+    configUrl: /docs/auth/v3/api-docs/swagger-config
+```
+
+```yaml
+# User Service
+springdoc:
+  swagger-ui:
+    url: /docs/user/v3/api-docs
+    configUrl: /docs/user/v3/api-docs/swagger-config
+```
+
+```yaml
+# Vehicle Service
+springdoc:
+  swagger-ui:
+    url: /docs/vehicle/v3/api-docs
+    configUrl: /docs/vehicle/v3/api-docs/swagger-config
+```
+
+<Info>
+  All API documentation is accessible through the gateway at `/docs/{service}/v3/api-docs`. This provides a centralized location for API exploration.
+</Info>
+
+## Related Configuration
+
+<CardGroup cols={2}>
+  <Card title="Eureka Settings" icon="broadcast-tower" href="/reference/eureka-settings">
+    Service discovery and registration configuration
+  </Card>
+  <Card title="Database Config" icon="database" href="/reference/database-config">
+    Database connection and migration settings
+  </Card>
+  <Card title="Observability" icon="chart-line" href="/reference/observability">
+    Monitoring, tracing, and logging configuration
+  </Card>
+  <Card title="Environment Variables" icon="code" href="/environments/variables">
+    Required and optional environment variables
+  </Card>
+</CardGroup>

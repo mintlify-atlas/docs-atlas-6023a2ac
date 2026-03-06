@@ -1,0 +1,550 @@
+---
+title: YAML Structure
+description: Best practices for organizing and structuring configuration files in the SGIVU Config Repository
+---
+
+## Overview
+
+Well-structured YAML configuration files are crucial for maintainability and reducing errors. The SGIVU Config Repository follows Spring Cloud Config conventions to organize configuration across base files and environment-specific overrides.
+
+## File Naming Convention
+
+Spring Cloud Config uses a specific naming pattern to resolve configuration:
+
+<CardGroup cols={2}>
+  <Card title="Base Configuration" icon="file">
+    `{application}.yml` - Shared configuration across all environments
+    
+    Example: `sgivu-auth.yml`
+  </Card>
+  <Card title="Profile-Specific" icon="layer-group">
+    `{application}-{profile}.yml` - Environment-specific overrides
+    
+    Example: `sgivu-auth-dev.yml`, `sgivu-auth-prod.yml`
+  </Card>
+</CardGroup>
+
+### Repository Example
+
+```text
+sgivu-config-repo/
+├── sgivu-auth.yml           # Base config for auth service
+├── sgivu-auth-dev.yml       # Dev overrides
+├── sgivu-auth-prod.yml      # Production overrides
+├── sgivu-gateway.yml        # Base config for gateway
+├── sgivu-gateway-dev.yml    # Dev overrides
+└── sgivu-gateway-prod.yml   # Production overrides
+```
+
+## Base Config vs Profile Overrides
+
+### What Goes in Base Files
+
+Base configuration files (`{application}.yml`) should contain:
+
+- **Common settings** that apply to all environments
+- **Reasonable defaults** for development
+- **Structure definitions** showing all available configuration keys
+- **Documentation** through comments
+
+#### Example: sgivu-auth.yml (Base Configuration)
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  session:
+    store-type: jdbc
+    jdbc:
+      initialize-schema: never
+      table-name: SPRING_SESSION
+      cleanup-cron: 0 */15 * * * *
+      flush-mode: on_save
+      save-mode: on_get_attribute
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+
+server:
+  port: ${PORT:9000}
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+
+logging:
+  level:
+    root: INFO
+```
+
+<Info>
+  Base files establish the "contract" - they show what configuration options are available and provide sensible defaults.
+</Info>
+
+### What Goes in Profile Files
+
+Profile-specific files should **only** override values that differ from the base:
+
+- **Environment-specific URLs** (database hosts, service endpoints)
+- **Credentials** and secret placeholders
+- **Logging levels** (verbose in dev, minimal in prod)
+- **Security settings** (relaxed in dev, strict in prod)
+- **Performance tuning** (connection pools, timeouts)
+
+#### Example: sgivu-auth-dev.yml (Development Overrides)
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${DEV_AUTH_DB_HOST:host.docker.internal}:${DEV_AUTH_DB_PORT:5432}/${DEV_AUTH_DB_NAME}
+    username: ${DEV_AUTH_DB_USERNAME}
+    password: ${DEV_AUTH_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+  flyway:
+    baseline-on-migrate: true
+    clean-disabled: false
+  session:
+    timeout: 2h
+
+angular-client:
+  url: ${DEV_ANGULAR_APP_URL}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+```
+
+#### Example: sgivu-auth-prod.yml (Production Overrides)
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${PROD_AUTH_DB_HOST:host.docker.internal}:${PROD_AUTH_DB_PORT:5432}/${PROD_AUTH_DB_NAME}
+    username: ${PROD_AUTH_DB_USERNAME}
+    password: ${PROD_AUTH_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  flyway:
+    clean-disabled: true
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+  session:
+    timeout: 2h
+
+angular-client:
+  url: ${PROD_ANGULAR_APP_URL}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+
+openapi:
+  server:
+    url: ${OPENAPI_SERVER_URL}
+```
+
+<Tip>
+  Profile files should be concise. If a value is the same across all environments, it belongs in the base file.
+</Tip>
+
+## Keeping Configuration DRY
+
+### Don't Repeat Yourself
+
+Avoid duplicating configuration across profile files:
+
+<Warning>
+  **Anti-pattern: Duplicating Eureka config in every profile**
+  
+  ```yaml
+  # ❌ sgivu-auth-dev.yml
+  eureka:
+    instance:
+      instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+    client:
+      service-url:
+        defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+  
+  # ❌ sgivu-auth-prod.yml
+  eureka:
+    instance:
+      instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+    client:
+      service-url:
+        defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+  ```
+</Warning>
+
+**Better approach: Define once in base file**
+
+```yaml
+# ✅ sgivu-auth.yml (base)
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+```
+
+### When to Override vs Extend
+
+Spring Cloud Config **merges** configurations, so you can:
+
+- **Override** specific values while keeping others from base
+- **Add** new keys that don't exist in base
+- **Cannot** partially merge lists (lists are replaced entirely)
+
+## Indentation and Formatting
+
+### Standard YAML Rules
+
+<Steps>
+  <Step title="Use Spaces, Not Tabs">
+    YAML requires spaces for indentation. Use **2 spaces** per level.
+    
+    ```yaml
+    spring:
+      datasource:  # 2 spaces
+        url: jdbc:postgresql://localhost:5432/db  # 4 spaces
+    ```
+  </Step>
+  
+  <Step title="Consistent Indentation">
+    Keep the same indentation level throughout the file
+    
+    ```yaml
+    # ✅ Good
+    spring:
+      jpa:
+        open-in-view: false
+      session:
+        store-type: jdbc
+    
+    # ❌ Bad - inconsistent indentation
+    spring:
+      jpa:
+         open-in-view: false
+      session:
+       store-type: jdbc
+    ```
+  </Step>
+  
+  <Step title="Quote String Values When Needed">
+    Use quotes for strings with special characters or that might be ambiguous
+    
+    ```yaml
+    service:
+      internal:
+        secret-key: "${SERVICE_INTERNAL_SECRET_KEY}"  # Quoted to preserve spaces
+    ```
+  </Step>
+</Steps>
+
+### List Formatting
+
+For lists, use the dash notation consistently:
+
+```yaml
+spring:
+  security:
+    oauth2:
+      client:
+        registration:
+          sgivu-gateway:
+            scope:
+              - openid
+              - profile
+              - email
+              - phone
+              - address
+              - offline_access
+              - api
+              - read
+              - write
+```
+
+## Comments and Documentation
+
+### When to Add Comments
+
+Add comments for:
+
+- **Non-obvious configuration** choices
+- **Security-critical** settings
+- **Performance tuning** parameters
+- **Environment-specific** behavior
+
+#### Example: Documented Logging Configuration
+
+From `sgivu-gateway-dev.yml`:
+
+```yaml
+# Niveles de log para depuración del flujo de autenticación/autorización en desarrollo.
+# - security: trazabilidad de cadenas de filtros, authorization decisions, login/logout
+# - gateway.security / gateway.controller: logs detallados de token relay, sesión, revocación
+# - oauth2.client: interacciones con el auth server (token requests, refreshes)
+# - session: operaciones de Redis session (creación, acceso, expiración)
+logging:
+  level:
+    com.sgivu.gateway.security: DEBUG
+    com.sgivu.gateway.controller: DEBUG
+    com.sgivu.gateway.config: DEBUG
+    org.springframework.security.oauth2.client: DEBUG
+    org.springframework.security.web.server.authentication: DEBUG
+    org.springframework.session.web.server: DEBUG
+```
+
+<Tip>
+  Good comments explain **why** a setting exists, not just **what** it does. The YAML structure already shows "what".
+</Tip>
+
+## Using yamllint
+
+The repository README recommends validating YAML files with `yamllint` before merging:
+
+### Installation
+
+```bash
+# Using pip
+pip install yamllint
+
+# Using apt (Ubuntu/Debian)
+sudo apt-get install yamllint
+
+# Using brew (macOS)
+brew install yamllint
+```
+
+### Basic Usage
+
+```bash
+# Lint a single file
+yamllint sgivu-auth.yml
+
+# Lint all YAML files
+yamllint *.yml
+
+# Lint with specific rules
+yamllint -d "{extends: default, rules: {line-length: {max: 120}}}" *.yml
+```
+
+### Common Issues yamllint Catches
+
+<CardGroup cols={2}>
+  <Card title="Indentation Errors" icon="indent">
+    Inconsistent spacing or tab usage
+  </Card>
+  <Card title="Trailing Spaces" icon="space-bar">
+    Whitespace at the end of lines
+  </Card>
+  <Card title="Line Length" icon="ruler-horizontal">
+    Lines exceeding recommended width
+  </Card>
+  <Card title="Syntax Errors" icon="triangle-exclamation">
+    Invalid YAML structure
+  </Card>
+</CardGroup>
+
+### Pre-commit Hook
+
+Consider adding a pre-commit hook to automatically lint YAML:
+
+```bash
+#!/bin/bash
+# .git/hooks/pre-commit
+
+echo "Running yamllint..."
+yamllint *.yml
+
+if [ $? -ne 0 ]; then
+  echo "❌ YAML validation failed. Please fix errors before committing."
+  exit 1
+fi
+
+echo "✅ YAML validation passed"
+```
+
+## Configuration Organization Patterns
+
+### Group Related Settings
+
+Organize configuration hierarchically:
+
+```yaml
+# ✅ Good - grouped by concern
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/db
+    username: ${DB_USER}
+    password: ${DB_PASSWORD}
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+
+# ❌ Avoid - scattered configuration
+spring:
+  datasource:
+    url: jdbc:postgresql://localhost:5432/db
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+```
+
+### Alphabetical Ordering
+
+For top-level keys, consider alphabetical ordering for consistency:
+
+```yaml
+eureka:
+  # ...
+
+logging:
+  # ...
+
+management:
+  # ...
+
+server:
+  # ...
+
+spring:
+  # ...
+
+springdoc:
+  # ...
+```
+
+## Examples of Well-Structured YAML
+
+### Minimal Service Configuration
+
+The `sgivu-discovery.yml` shows a clean, minimal configuration:
+
+```yaml
+server:
+  port: 8761
+
+eureka:
+  instance:
+    hostname: host.docker.internal
+  client:
+    registerWithEureka: false
+    fetchRegistry: false
+    serviceUrl:
+      defaultZone: http://${eureka.instance.hostname}:${server.port}/eureka/
+```
+
+<Info>
+  Simple services like Eureka Discovery don't need complex configurations. Keep it simple when possible.
+</Info>
+
+### Complex Service Configuration
+
+The `sgivu-gateway.yml` demonstrates organizing a complex OAuth2 + Redis + Eureka configuration:
+
+```yaml
+spring:
+  session:
+    store-type: redis
+    timeout: 1h
+    redis:
+      namespace: spring:session:sgivu-gateway
+  data:
+    redis:
+      host: ${REDIS_HOST:sgivu-redis}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD}
+  security:
+    oauth2:
+      client:
+        registration:
+          sgivu-gateway:
+            provider: sgivu-auth
+            client-id: sgivu-gateway
+            client-secret: ${SGIVU_GATEWAY_SECRET}
+            # ... more OAuth2 config
+
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+```
+
+<Tip>
+  Even complex configurations remain readable when properly indented and grouped by concern.
+</Tip>
+
+## Structure Checklist
+
+Before committing YAML files:
+
+- [ ] Base file contains common settings
+- [ ] Profile files only override necessary values
+- [ ] Indentation is consistent (2 spaces per level)
+- [ ] No duplicate configuration across files
+- [ ] Related settings are grouped together
+- [ ] Comments explain non-obvious choices
+- [ ] All files pass `yamllint` validation
+- [ ] Secret values use `${VAR_NAME}` placeholders
+- [ ] Lists use consistent dash notation
+- [ ] String values are quoted when necessary
+
+## Best Practices Summary
+
+1. **Separate concerns** - Base files for common config, profiles for overrides
+2. **Stay DRY** - Don't duplicate configuration across files
+3. **Use consistent formatting** - 2 spaces, no tabs, validate with yamllint
+4. **Document wisely** - Explain "why", not just "what"
+5. **Group logically** - Organize settings by functional area
+6. **Keep it simple** - Only override what needs to change per environment
+7. **Validate before commit** - Use yamllint to catch errors early
+8. **Use placeholders** - Externalize all environment-specific values

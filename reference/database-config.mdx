@@ -1,0 +1,420 @@
+---
+title: Database Configuration
+description: Database connection, JPA, and Flyway migration configuration patterns in SGIVU
+---
+
+SGIVU uses PostgreSQL databases with Flyway migrations for schema management. This page documents the standard database configuration patterns.
+
+## Services with Databases
+
+The following services require database configuration:
+
+<CardGroup cols={2}>
+  <Card title="Auth Service" icon="lock">
+    Manages OAuth2/OIDC data, user authentication, and session storage
+  </Card>
+  <Card title="User Service" icon="user">
+    Stores user profiles and related data
+  </Card>
+  <Card title="Client Service" icon="building">
+    Manages client/customer information
+  </Card>
+  <Card title="Vehicle Service" icon="car">
+    Stores vehicle inventory and details
+  </Card>
+  <Card title="Purchase-Sale Service" icon="receipt">
+    Tracks transactions and purchase/sale records
+  </Card>
+</CardGroup>
+
+## Standard Database Configuration
+
+All data-access services use this base configuration pattern:
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+## JPA Configuration
+
+### Open In View
+
+<ParamField path="spring.jpa.open-in-view" type="boolean" required>
+  Controls whether JPA sessions remain open during view rendering. Always set to `false` in SGIVU services.
+</ParamField>
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+```
+
+<Warning>
+  Setting `open-in-view: false` is a best practice for REST APIs. It prevents lazy loading exceptions and enforces explicit transaction boundaries in controllers.
+</Warning>
+
+### Hibernate DDL Mode (Profile-Specific)
+
+Different profiles use different DDL strategies:
+
+#### Development Profile
+
+```yaml
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+```
+
+<ParamField path="spring.jpa.hibernate.ddl-auto" type="string">
+  Hibernate schema generation mode. Use `validate` to verify schema matches entities without modifying the database.
+</ParamField>
+
+<ParamField path="spring.jpa.show-sql" type="boolean">
+  Enables SQL statement logging. Set to `true` in development for debugging.
+</ParamField>
+
+#### Production Profile
+
+```yaml
+spring:
+  jpa:
+    hibernate:
+      ddl-auto: validate
+```
+
+<Info>
+  Production profiles disable SQL logging for performance and security. Schema validation ensures entities match the database structure.
+</Info>
+
+## Flyway Migration Configuration
+
+SGIVU uses Flyway for database schema versioning and migrations.
+
+### Base Configuration
+
+<ParamField path="spring.flyway.enabled" type="boolean" required>
+  Enables Flyway migrations. Set to `true` for all services with databases.
+</ParamField>
+
+<ParamField path="spring.flyway.locations" type="string" required>
+  Classpath location of migration scripts. Standard location is `classpath:db/migration`.
+</ParamField>
+
+<ParamField path="spring.flyway.baseline-on-migrate" type="boolean">
+  Creates a baseline version when migrating an existing database. Controlled by `FLYWAY_BASELINE_ON_MIGRATE` environment variable.
+</ParamField>
+
+<ParamField path="spring.flyway.baseline-version" type="integer">
+  Version number for the baseline. Set to `0` to mark the starting point.
+</ParamField>
+
+<ParamField path="spring.flyway.validate-on-migrate" type="boolean">
+  Validates applied migrations before running new ones. Set to `true` to ensure migration integrity.
+</ParamField>
+
+```yaml
+spring:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+### Profile-Specific Flyway Settings
+
+#### Development Profile
+
+```yaml
+spring:
+  flyway:
+    baseline-on-migrate: true
+    clean-disabled: false
+```
+
+<ParamField path="spring.flyway.clean-disabled" type="boolean">
+  Prevents Flyway from dropping all database objects. Set to `false` in development to allow clean operations.
+</ParamField>
+
+<Warning>
+  Enabling `clean-disabled: false` in development allows destructive operations. Never use this in production.
+</Warning>
+
+#### Production Profile
+
+```yaml
+spring:
+  flyway:
+    clean-disabled: true
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+```
+
+<Note>
+  Production profiles explicitly disable clean operations to prevent accidental data loss.
+</Note>
+
+## Database Connection Configuration
+
+Database connection details are profile-specific and environment-driven:
+
+### Development Profile
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${DEV_AUTH_DB_HOST:host.docker.internal}:${DEV_AUTH_DB_PORT:5432}/${DEV_AUTH_DB_NAME}
+    username: ${DEV_AUTH_DB_USERNAME}
+    password: ${DEV_AUTH_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+```
+
+### Production Profile
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${PROD_AUTH_DB_HOST:host.docker.internal}:${PROD_AUTH_DB_PORT:5432}/${PROD_AUTH_DB_NAME}
+    username: ${PROD_AUTH_DB_USERNAME}
+    password: ${PROD_AUTH_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+```
+
+<Accordion title="Environment Variable Patterns">
+  Each service uses prefixed environment variables:
+  
+  **Auth Service:**
+  - `DEV_AUTH_DB_HOST` / `PROD_AUTH_DB_HOST`
+  - `DEV_AUTH_DB_PORT` / `PROD_AUTH_DB_PORT`
+  - `DEV_AUTH_DB_NAME` / `PROD_AUTH_DB_NAME`
+  - `DEV_AUTH_DB_USERNAME` / `PROD_AUTH_DB_USERNAME`
+  - `DEV_AUTH_DB_PASSWORD` / `PROD_AUTH_DB_PASSWORD`
+  
+  **User Service:**
+  - `DEV_USER_DB_HOST` / `PROD_USER_DB_HOST`
+  - (same pattern for other variables)
+  
+  This prefix pattern is used for all services with databases.
+</Accordion>
+
+## Migration Script Organization
+
+Flyway migrations should be placed in `src/main/resources/db/migration` with the following naming convention:
+
+```
+V{version}__{description}.sql
+```
+
+### Examples
+
+```
+V1__initial_schema.sql
+V2__add_user_roles.sql
+V3__create_vehicle_table.sql
+V4__add_transaction_indexes.sql
+```
+
+<Info>
+  Version numbers should be sequential integers. Flyway applies migrations in order and tracks which versions have been applied.
+</Info>
+
+## Complete Service Examples
+
+### Auth Service (sgivu-auth.yml)
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  session:
+    store-type: jdbc
+    jdbc:
+      initialize-schema: never
+      table-name: SPRING_SESSION
+      cleanup-cron: 0 */15 * * * *
+      flush-mode: on_save
+      save-mode: on_get_attribute
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+<Note>
+  The Auth Service additionally uses JDBC-backed sessions, which requires database configuration for the `SPRING_SESSION` table.
+</Note>
+
+### User Service (sgivu-user.yml)
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+### Vehicle Service (sgivu-vehicle.yml)
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+### Client Service (sgivu-client.yml)
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+### Purchase-Sale Service (sgivu-purchase-sale.yml)
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+## Session Storage (Auth Service)
+
+The Auth Service uses JDBC-backed session storage:
+
+<ParamField path="spring.session.store-type" type="string">
+  Session storage mechanism. Set to `jdbc` for database-backed sessions.
+</ParamField>
+
+<ParamField path="spring.session.jdbc.initialize-schema" type="string">
+  Controls session table creation. Set to `never` since Flyway manages the schema.
+</ParamField>
+
+<ParamField path="spring.session.jdbc.table-name" type="string">
+  Name of the session table. Standard value is `SPRING_SESSION`.
+</ParamField>
+
+<ParamField path="spring.session.jdbc.cleanup-cron" type="string">
+  Cron expression for expired session cleanup. Runs every 15 minutes.
+</ParamField>
+
+```yaml
+spring:
+  session:
+    store-type: jdbc
+    jdbc:
+      initialize-schema: never
+      table-name: SPRING_SESSION
+      cleanup-cron: 0 */15 * * * *
+      flush-mode: on_save
+      save-mode: on_get_attribute
+```
+
+<Warning>
+  Set `initialize-schema: never` to prevent Spring Session from creating tables. Flyway should manage all schema changes.
+</Warning>
+
+## Troubleshooting
+
+<Accordion title="Flyway baseline errors">
+  **Error:** `Found non-empty schema without schema history table`
+  
+  **Solution:** Set the `FLYWAY_BASELINE_ON_MIGRATE` environment variable to `true` for the initial migration:
+  
+  ```bash
+  FLYWAY_BASELINE_ON_MIGRATE=true
+  ```
+  
+  This creates a baseline version and allows Flyway to start managing an existing database.
+</Accordion>
+
+<Accordion title="Flyway validation failures">
+  **Error:** `Validate failed: Migration checksum mismatch`
+  
+  **Causes:**
+  - Migration file was modified after being applied
+  - Different migration file with same version number
+  
+  **Solutions:**
+  1. Never modify applied migrations - create a new migration instead
+  2. If in development, clean the database and re-run migrations
+  3. If in production, repair the Flyway schema history table
+</Accordion>
+
+<Accordion title="JPA lazy loading exceptions">
+  **Error:** `LazyInitializationException: could not initialize proxy - no Session`
+  
+  **Cause:** Attempting to access lazy-loaded relationships outside a transaction.
+  
+  **Solution:** With `open-in-view: false`, you must:
+  1. Explicitly fetch required relationships in your queries
+  2. Use `@Transactional` on service methods that load entities
+  3. Use DTO projections to avoid lazy loading issues
+</Accordion>
+
+<Accordion title="Connection pool exhaustion">
+  **Symptoms:**
+  - Slow response times
+  - Timeout errors
+  - "Connection is not available" exceptions
+  
+  **Solutions:**
+  1. Ensure transactions are properly closed (use `@Transactional`)
+  2. Configure connection pool settings (HikariCP)
+  3. Check for connection leaks in application code
+  4. Increase pool size if needed (with proper resource analysis)
+</Accordion>
+
+## Related Configuration
+
+<CardGroup cols={2}>
+  <Card title="Spring Configuration" icon="leaf" href="/reference/spring-configuration">
+    JPA and session management settings
+  </Card>
+  <Card title="Environment Variables" icon="code" href="/environments/variables">
+    Database connection environment variables
+  </Card>
+  <Card title="Service Configuration" icon="gears" href="/services/overview">
+    Individual service database requirements
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/getting-started/local-development">
+    Database setup in different environments
+  </Card>
+</CardGroup>

@@ -1,0 +1,430 @@
+---
+title: User Service Configuration
+description: User management microservice configuration for the SGIVU platform
+---
+
+The User Service (`sgivu-user`) manages user accounts, profiles, and related operations in the SGIVU platform.
+
+## Service Overview
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="network-wired">
+    8081
+  </Card>
+  <Card title="Database" icon="database">
+    PostgreSQL
+  </Card>
+  <Card title="Migration" icon="code-branch">
+    Flyway
+  </Card>
+  <Card title="Role" icon="user">
+    User Management
+  </Card>
+</CardGroup>
+
+## Key Features
+
+- User account management (CRUD operations)
+- User profile data storage
+- Integration with Auth Service for authentication
+- Database migration with Flyway
+- RESTful API with OpenAPI documentation
+- Internal service authentication
+
+## Base Configuration
+
+### Server Settings
+
+```yaml
+server:
+  port: ${PORT:8081}
+```
+
+### JPA Configuration
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+```
+
+<Note>
+`open-in-view: false` ensures all database operations happen within transaction boundaries, preventing lazy loading exceptions.
+</Note>
+
+### Flyway Migration
+
+```yaml
+spring:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+<Accordion title="Flyway Configuration Details">
+- **enabled: true**: Automatic migrations on startup
+- **locations**: Migration scripts location
+- **baseline-on-migrate**: Initialize versioning on existing databases
+- **baseline-version: 0**: Start versioning from 0
+- **validate-on-migrate: true**: Verify migration checksums
+</Accordion>
+
+## Database Configuration
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://${DEV_USER_DB_HOST:host.docker.internal}:${DEV_USER_DB_PORT:5432}/${DEV_USER_DB_NAME}
+        username: ${DEV_USER_DB_USERNAME}
+        password: ${DEV_USER_DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: true
+        properties:
+          hibernate:
+            format_sql: true
+      flyway:
+        locations: classpath:db/migration, classpath:db/seed
+        baseline-on-migrate: true
+        clean-disabled: false
+    ```
+    
+    **Development Features:**
+    - SQL logging enabled with formatting
+    - Seed data included (`classpath:db/seed`)
+    - Flyway clean allowed for testing
+    - Baseline on migrate for existing databases
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://${PROD_USER_DB_HOST}:${PROD_USER_DB_PORT}/${PROD_USER_DB_NAME}
+        username: ${PROD_USER_DB_USERNAME}
+        password: ${PROD_USER_DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+      flyway:
+        clean-disabled: true
+        baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    ```
+    
+    **Production Safety:**
+    - No SQL logging for performance
+    - Flyway clean disabled (prevents data loss)
+    - No seed data
+  </Tab>
+</Tabs>
+
+<Warning>
+Always use `ddl-auto: validate` in production to prevent Hibernate from modifying the schema. Flyway manages migrations.
+</Warning>
+
+## Service Integration
+
+### Eureka Registration
+
+```yaml
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+```
+
+<Info>
+The random value in the instance ID allows running multiple instances for load balancing.
+</Info>
+
+### Service Discovery Map
+
+```yaml
+services:
+  map:
+    sgivu-auth:
+      name: sgivu-auth
+      url: ${SGIVU_AUTH_URL:http://sgivu-auth:9000}
+```
+
+The User Service communicates with the Auth Service for token validation.
+
+### Internal Service Authentication
+
+```yaml
+service:
+  internal:
+    secret-key: "${SERVICE_INTERNAL_SECRET_KEY}"
+```
+
+<Note>
+This shared secret authenticates internal API calls from other services (particularly Auth Service).
+</Note>
+
+## Observability
+
+### Actuator Endpoints
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: "*"
+      endpoint:
+        health:
+          show-details: always
+    ```
+    
+    All endpoints exposed for debugging.
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health, info, prometheus
+      endpoint:
+        health:
+          show-details: never
+    ```
+    
+    Limited endpoints for security and Prometheus integration.
+  </Tab>
+</Tabs>
+
+### Distributed Tracing
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+<Info>
+Samples 10% of requests to balance observability with performance overhead.
+</Info>
+
+### Logging
+
+```yaml
+logging:
+  level:
+    root: INFO
+```
+
+## API Documentation
+
+```yaml
+springdoc:
+  swagger-ui:
+    url: /docs/user/v3/api-docs
+    configUrl: /docs/user/v3/api-docs/swagger-config
+```
+
+Access the API documentation through the gateway:
+```
+http://localhost:8080/docs/user/v3/api-docs
+```
+
+<Tabs>
+  <Tab title="Production">
+    ```yaml
+    openapi:
+      server:
+        url: ${OPENAPI_SERVER_URL}
+    ```
+    
+    Production overrides the server URL for public documentation.
+  </Tab>
+</Tabs>
+
+## Database Schema Management
+
+### Migration Strategy
+
+1. **Development**: Flyway applies migrations and seed data on startup
+2. **Production**: Flyway applies migrations only (no seed data)
+
+### Migration Locations
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    flyway:
+      locations: classpath:db/migration, classpath:db/seed
+    ```
+    
+    Includes test data for development.
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    flyway:
+      locations: classpath:db/migration
+    ```
+    
+    Migrations only, no seed data.
+  </Tab>
+</Tabs>
+
+### Example Migration Structure
+
+```
+src/main/resources/
+├── db/
+│   ├── migration/
+│   │   ├── V1__create_users_table.sql
+│   │   ├── V2__add_email_verification.sql
+│   │   └── V3__add_user_profiles.sql
+│   └── seed/
+│       └── R__seed_test_users.sql
+```
+
+<Note>
+Repeatable migrations (prefix `R__`) run on every startup if their checksum changes.
+</Note>
+
+## Required Environment Variables
+
+### All Environments
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `SERVICE_INTERNAL_SECRET_KEY` | Shared secret for internal APIs | `your-secret-key` |
+
+### Development
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `DEV_USER_DB_HOST` | Database host | `host.docker.internal` |
+| `DEV_USER_DB_PORT` | Database port | `5432` |
+| `DEV_USER_DB_NAME` | Database name | Required |
+| `DEV_USER_DB_USERNAME` | Database username | Required |
+| `DEV_USER_DB_PASSWORD` | Database password | Required |
+
+### Production
+
+| Variable | Description |
+|----------|-------------|
+| `PROD_USER_DB_HOST` | Database host |
+| `PROD_USER_DB_PORT` | Database port |
+| `PROD_USER_DB_NAME` | Database name |
+| `PROD_USER_DB_USERNAME` | Database username |
+| `PROD_USER_DB_PASSWORD` | Database password |
+| `OPENAPI_SERVER_URL` | Public API docs URL |
+
+### Optional
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `8081` |
+| `EUREKA_URL` | Eureka server URL | `http://sgivu-discovery:8761/eureka` |
+| `SGIVU_AUTH_URL` | Auth service URL | `http://sgivu-auth:9000` |
+| `FLYWAY_BASELINE_ON_MIGRATE` | Baseline existing DB | `false` |
+
+## API Endpoints
+
+Typical User Service endpoints (accessed via gateway):
+
+```
+GET    /api/users           - List users
+GET    /api/users/{id}      - Get user by ID
+POST   /api/users           - Create user
+PUT    /api/users/{id}      - Update user
+DELETE /api/users/{id}      - Delete user
+GET    /api/users/me        - Get current user profile
+PUT    /api/users/me        - Update current user profile
+```
+
+<Note>
+All endpoints require authentication via the gateway's OAuth2 flow.
+</Note>
+
+## Security
+
+### OAuth2 Resource Server
+
+The service validates JWT tokens from the Auth Service:
+
+```yaml
+services:
+  map:
+    sgivu-auth:
+      name: sgivu-auth
+      url: ${SGIVU_AUTH_URL:http://sgivu-auth:9000}
+```
+
+### Internal API Protection
+
+Internal endpoints use the shared secret key:
+
+```yaml
+service:
+  internal:
+    secret-key: "${SERVICE_INTERNAL_SECRET_KEY}"
+```
+
+## Performance Considerations
+
+### Database Connection Pooling
+
+Spring Boot auto-configures HikariCP for connection pooling:
+
+```yaml
+spring:
+  datasource:
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 5
+      connection-timeout: 30000
+```
+
+<Info>
+Adjust pool sizes based on expected load and database resources.
+</Info>
+
+### JPA Optimization
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+```
+
+Disabling open-in-view forces explicit transaction boundaries, improving performance.
+
+## Configuration Files
+
+- `sgivu-user.yml` - Base configuration
+- `sgivu-user-dev.yml` - Development overrides
+- `sgivu-user-prod.yml` - Production overrides
+
+## Related Services
+
+<CardGroup cols={3}>
+  <Card title="Auth Service" icon="shield-halved" href="/services/auth">
+    Authenticates users
+  </Card>
+  <Card title="Gateway" icon="door-open" href="/services/gateway">
+    Routes user API requests
+  </Card>
+  <Card title="Purchase-Sale" icon="handshake" href="/services/purchase-sale">
+    Retrieves user data
+  </Card>
+</CardGroup>

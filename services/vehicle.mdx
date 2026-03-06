@@ -1,0 +1,473 @@
+---
+title: Vehicle Service Configuration
+description: Vehicle catalog management with AWS S3 integration for the SGIVU platform
+---
+
+The Vehicle Service (`sgivu-vehicle`) manages the vehicle catalog, including vehicle data, images, and media storage using AWS S3.
+
+## Service Overview
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="network-wired">
+    8083
+  </Card>
+  <Card title="Database" icon="database">
+    PostgreSQL
+  </Card>
+  <Card title="Storage" icon="cloud">
+    AWS S3
+  </Card>
+  <Card title="Role" icon="car">
+    Vehicle Catalog
+  </Card>
+</CardGroup>
+
+## Key Features
+
+- Vehicle catalog management (CRUD operations)
+- Image and media storage with AWS S3
+- Multipart file upload support (up to 100MB)
+- Database migration with Flyway
+- RESTful API with OpenAPI documentation
+- Internal service authentication
+- CORS configuration for frontend access
+
+## Base Configuration
+
+### Server Settings
+
+```yaml
+server:
+  port: ${PORT:8083}
+```
+
+### JPA Configuration
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+```
+
+<Info>
+Disabling open-in-view enforces explicit transaction boundaries and prevents lazy loading issues.
+</Info>
+
+## File Upload Configuration
+
+### Multipart Settings
+
+```yaml
+spring:
+  servlet:
+    multipart:
+      max-file-size: 10MB
+      max-request-size: 100MB
+```
+
+<Accordion title="Upload Limits">
+- **max-file-size: 10MB**: Individual file size limit
+- **max-request-size: 100MB**: Total request size (supports multiple files)
+- Allows batch upload of vehicle images
+- Prevents memory exhaustion from large uploads
+</Accordion>
+
+<Warning>
+Ensure your reverse proxy (nginx, gateway) also allows these request sizes, or uploads will fail before reaching the service.
+</Warning>
+
+### Local Storage Destination
+
+```yaml
+spring:
+  destination:
+    folder: ./src/main/resources/static/images/vehicles
+```
+
+<Note>
+This local folder is used for temporary storage or development. Production uses S3 exclusively.
+</Note>
+
+## AWS S3 Configuration
+
+### S3 Settings
+
+```yaml
+aws:
+  s3:
+    vehicles-bucket: ${AWS_VEHICLES_BUCKET}
+    allowed-origins: ${AWS_S3_ALLOWED_ORIGINS:http://localhost:4200,https://localhost:4200}
+  access:
+    key: ${AWS_ACCESS_KEY}
+  secret:
+    key: ${AWS_SECRET_KEY}
+  region: ${AWS_REGION}
+```
+
+<Accordion title="AWS Configuration Details">
+- **vehicles-bucket**: S3 bucket name for vehicle images
+- **allowed-origins**: CORS origins for S3 pre-signed URLs
+- **access.key**: AWS access key ID
+- **secret.key**: AWS secret access key
+- **region**: AWS region (e.g., us-east-1, eu-west-1)
+</Accordion>
+
+<Warning>
+Never commit AWS credentials to source control. Use environment variables or AWS IAM roles (recommended).
+</Warning>
+
+### S3 Bucket Policy
+
+Your S3 bucket should have:
+
+- Public read access for vehicle images (or use pre-signed URLs)
+- CORS configuration matching `allowed-origins`
+- Lifecycle policies for managing old images
+
+### Example S3 CORS Configuration
+
+```json
+[
+  {
+    "AllowedHeaders": ["*"],
+    "AllowedMethods": ["GET", "PUT", "POST", "DELETE"],
+    "AllowedOrigins": [
+      "http://localhost:4200",
+      "https://your-production-domain.com"
+    ],
+    "ExposeHeaders": ["ETag"]
+  }
+]
+```
+
+## Database Configuration
+
+### Flyway Migration
+
+```yaml
+spring:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://${DEV_VEHICLE_DB_HOST:host.docker.internal}:${DEV_VEHICLE_DB_PORT:5432}/${DEV_VEHICLE_DB_NAME}
+        username: ${DEV_VEHICLE_DB_USERNAME}
+        password: ${DEV_VEHICLE_DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: true
+        properties:
+          hibernate:
+            format_sql: true
+      flyway:
+        baseline-on-migrate: true
+        clean-disabled: true
+    ```
+    
+    Development enables SQL logging and allows baseline migration.
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://${PROD_VEHICLE_DB_HOST}:${PROD_VEHICLE_DB_PORT}/${PROD_VEHICLE_DB_NAME}
+        username: ${PROD_VEHICLE_DB_USERNAME}
+        password: ${PROD_VEHICLE_DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+      flyway:
+        clean-disabled: true
+        baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    ```
+    
+    Production disables SQL logging and prevents Flyway clean.
+  </Tab>
+</Tabs>
+
+## Service Integration
+
+### Eureka Registration
+
+```yaml
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+```
+
+### Service Discovery Map
+
+```yaml
+services:
+  map:
+    sgivu-auth:
+      name: sgivu-auth
+      url: ${SGIVU_AUTH_URL:http://sgivu-auth:9000}
+```
+
+### Internal Service Authentication
+
+```yaml
+service:
+  internal:
+    secret-key: "${SERVICE_INTERNAL_SECRET_KEY}"
+```
+
+<Info>
+The Purchase-Sale Service uses this secret to query vehicle data.
+</Info>
+
+## Observability
+
+### Actuator Endpoints
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: "*"
+      endpoint:
+        health:
+          show-details: always
+    ```
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health, info, prometheus
+      endpoint:
+        health:
+          show-details: never
+    ```
+  </Tab>
+</Tabs>
+
+### Distributed Tracing
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+### Logging
+
+```yaml
+logging:
+  level:
+    root: INFO
+    software:
+      amazon:
+        awssdk: info
+```
+
+<Accordion title="AWS SDK Logging">
+The AWS SDK logger is set to `info` level to:
+- Show important S3 operations
+- Avoid verbose DEBUG logs
+- Maintain visibility into AWS API calls
+</Accordion>
+
+## API Documentation
+
+```yaml
+springdoc:
+  swagger-ui:
+    url: /docs/vehicle/v3/api-docs
+    configUrl: /docs/vehicle/v3/api-docs/swagger-config
+```
+
+<Tabs>
+  <Tab title="Production">
+    ```yaml
+    openapi:
+      server:
+        url: ${OPENAPI_SERVER_URL}
+    ```
+  </Tab>
+</Tabs>
+
+## Required Environment Variables
+
+### All Environments
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `SERVICE_INTERNAL_SECRET_KEY` | Shared secret for internal APIs | `your-secret-key` |
+| `AWS_VEHICLES_BUCKET` | S3 bucket name | `sgivu-vehicles` |
+| `AWS_ACCESS_KEY` | AWS access key ID | `AKIAIOSFODNN7EXAMPLE` |
+| `AWS_SECRET_KEY` | AWS secret access key | `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY` |
+| `AWS_REGION` | AWS region | `us-east-1` |
+
+<Warning>
+For production, use AWS IAM roles instead of access keys when running in EC2/ECS.
+</Warning>
+
+### Development
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `DEV_VEHICLE_DB_HOST` | Database host | `host.docker.internal` |
+| `DEV_VEHICLE_DB_PORT` | Database port | `5432` |
+| `DEV_VEHICLE_DB_NAME` | Database name | Required |
+| `DEV_VEHICLE_DB_USERNAME` | Database username | Required |
+| `DEV_VEHICLE_DB_PASSWORD` | Database password | Required |
+
+### Production
+
+| Variable | Description |
+|----------|-------------|
+| `PROD_VEHICLE_DB_HOST` | Database host |
+| `PROD_VEHICLE_DB_PORT` | Database port |
+| `PROD_VEHICLE_DB_NAME` | Database name |
+| `PROD_VEHICLE_DB_USERNAME` | Database username |
+| `PROD_VEHICLE_DB_PASSWORD` | Database password |
+| `OPENAPI_SERVER_URL` | Public API docs URL |
+
+### Optional
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `8083` |
+| `EUREKA_URL` | Eureka server URL | `http://sgivu-discovery:8761/eureka` |
+| `AWS_S3_ALLOWED_ORIGINS` | CORS origins | `http://localhost:4200,https://localhost:4200` |
+
+## API Endpoints
+
+Typical Vehicle Service endpoints:
+
+```
+GET    /api/vehicles              - List vehicles
+GET    /api/vehicles/{id}         - Get vehicle by ID
+POST   /api/vehicles              - Create vehicle
+PUT    /api/vehicles/{id}         - Update vehicle
+DELETE /api/vehicles/{id}         - Delete vehicle
+POST   /api/vehicles/{id}/images  - Upload images
+DELETE /api/vehicles/{id}/images/{imageId} - Delete image
+```
+
+<Info>
+All endpoints require authentication through the gateway.
+</Info>
+
+## Vehicle Data Model
+
+Typical vehicle entity includes:
+
+- Basic info (make, model, year, VIN)
+- Specifications (engine, transmission, color)
+- Pricing and availability
+- Image URLs (stored in S3)
+- Created/updated timestamps
+
+## S3 Integration Patterns
+
+### Upload Flow
+
+1. Client uploads images via POST `/api/vehicles/{id}/images`
+2. Service receives multipart file
+3. Service uploads to S3 with unique key
+4. S3 URL stored in database
+5. Response includes image URL
+
+### Pre-signed URLs
+
+For secure direct uploads:
+
+```java
+// Generate pre-signed URL
+GeneratePresignedUrlRequest request = new GeneratePresignedUrlRequest(
+    bucketName, objectKey)
+    .withMethod(HttpMethod.PUT)
+    .withExpiration(expiration);
+URL url = s3Client.generatePresignedUrl(request);
+```
+
+### Image Deletion
+
+When deleting a vehicle or image:
+
+1. Delete database record
+2. Delete S3 object
+3. Handle failures gracefully (eventual consistency)
+
+<Note>
+Consider implementing soft deletes and periodic cleanup jobs for orphaned S3 objects.
+</Note>
+
+## Security Considerations
+
+### S3 Bucket Security
+
+- Use least privilege IAM policies
+- Enable S3 bucket versioning
+- Configure server-side encryption (SSE-S3 or SSE-KMS)
+- Enable access logging
+- Block public access unless necessary
+
+### File Upload Security
+
+- Validate file types (only allow images)
+- Scan for malware
+- Generate unique file names (prevent overwrite)
+- Limit file sizes
+
+## Performance Optimization
+
+### S3 Performance
+
+- Use CloudFront CDN for image delivery
+- Implement caching strategies
+- Compress images before upload
+- Use S3 Transfer Acceleration for large files
+
+### Database Performance
+
+- Index search columns (make, model, year)
+- Use pagination for list endpoints
+- Cache frequently accessed vehicles
+
+## Configuration Files
+
+- `sgivu-vehicle.yml` - Base configuration
+- `sgivu-vehicle-dev.yml` - Development overrides
+- `sgivu-vehicle-prod.yml` - Production overrides
+
+## Related Services
+
+<CardGroup cols={3}>
+  <Card title="Purchase-Sale" icon="handshake" href="/services/purchase-sale">
+    Retrieves vehicle data
+  </Card>
+  <Card title="Auth Service" icon="shield-halved" href="/services/auth">
+    Token validation
+  </Card>
+  <Card title="Gateway" icon="door-open" href="/services/gateway">
+    API routing
+  </Card>
+</CardGroup>

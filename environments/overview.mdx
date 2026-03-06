@@ -1,0 +1,279 @@
+---
+title: 'Environment Management Overview'
+description: 'Understanding Spring Cloud Config profiles and environment-specific configurations'
+icon: 'layer-group'
+---
+
+## Introduction
+
+The SGIVU Config Repository uses **Spring Cloud Config profiles** to manage environment-specific configurations across development, production, and other environments. This approach allows you to maintain a single source of truth while providing environment-specific overrides.
+
+## Spring Cloud Config Profile Mechanism
+
+### Base Configuration Files
+
+Base configuration files follow the naming pattern `{application}.yml` and contain shared settings that apply to all environments:
+
+```yaml
+# sgivu-auth.yml
+spring:
+  jpa:
+    open-in-view: false
+  session:
+    store-type: jdbc
+
+eureka:
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+
+server:
+  port: ${PORT:9000}
+```
+
+These files define:
+- Common service configurations
+- Default values with fallback using `${VAR:default}`
+- Shared Spring Boot settings
+- Service discovery configuration
+- Management endpoints
+
+### Profile-Specific Overrides
+
+Profile-specific files follow the pattern `{application}-{profile}.yml` and override or extend base configurations:
+
+```yaml
+# sgivu-auth-dev.yml
+spring:
+  datasource:
+    url: jdbc:postgresql://${DEV_AUTH_DB_HOST:host.docker.internal}:${DEV_AUTH_DB_PORT:5432}/${DEV_AUTH_DB_NAME}
+    username: ${DEV_AUTH_DB_USERNAME}
+    password: ${DEV_AUTH_DB_PASSWORD}
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+```
+
+## Naming Convention
+
+<CardGroup cols={2}>
+  <Card title="Base Files" icon="file">
+    - `sgivu-auth.yml`
+    - `sgivu-gateway.yml`
+    - `sgivu-user.yml`
+    - `sgivu-vehicle.yml`
+    - `sgivu-client.yml`
+    - `sgivu-purchase-sale.yml`
+    - `sgivu-discovery.yml`
+  </Card>
+  
+  <Card title="Profile Files" icon="files">
+    - `sgivu-auth-dev.yml`
+    - `sgivu-auth-prod.yml`
+    - `sgivu-gateway-dev.yml`
+    - `sgivu-gateway-prod.yml`
+    - And so on...
+  </Card>
+</CardGroup>
+
+## How Services Activate Profiles
+
+### Application Startup
+
+Services activate profiles at startup using the `spring.profiles.active` property:
+
+```bash
+# Via command line
+java -jar sgivu-auth.jar --spring.profiles.active=dev
+
+# Via environment variable
+export SPRING_PROFILES_ACTIVE=dev
+java -jar sgivu-auth.jar
+```
+
+### Docker Compose
+
+```yaml
+services:
+  sgivu-auth:
+    image: sgivu-auth:latest
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+```
+
+### Kubernetes
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+spec:
+  template:
+    spec:
+      containers:
+      - name: sgivu-auth
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "prod"
+```
+
+## Profile Precedence and Override Rules
+
+<Info>
+Spring Cloud Config merges configurations with **profile-specific values taking precedence** over base values.
+</Info>
+
+### Merge Behavior
+
+1. **Base configuration is loaded first**
+   - All settings from `{application}.yml` are applied
+
+2. **Profile configuration is applied second**
+   - Settings from `{application}-{profile}.yml` override matching keys
+   - New keys are added to the configuration
+   - Nested properties are merged at the leaf level
+
+### Example: Merged Configuration
+
+**Base (`sgivu-auth.yml`):**
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+
+logging:
+  level:
+    root: INFO
+```
+
+**Dev Profile (`sgivu-auth-dev.yml`):**
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # Overrides base
+  endpoint:
+    health:
+      show-details: always  # Overrides base
+```
+
+**Resulting Configuration (dev profile):**
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"          # From dev profile
+  endpoint:
+    health:
+      show-details: always     # From dev profile
+
+logging:
+  level:
+    root: INFO                 # From base (not overridden)
+```
+
+## Configuration Priority Order
+
+When multiple configuration sources exist, Spring Boot applies them in this order (highest to lowest priority):
+
+<Steps>
+  <Step title="Command line arguments">
+    `--server.port=9001`
+  </Step>
+  
+  <Step title="Environment variables">
+    `SERVER_PORT=9001`
+  </Step>
+  
+  <Step title="Profile-specific config">
+    `{application}-{profile}.yml`
+  </Step>
+  
+  <Step title="Base config">
+    `{application}.yml`
+  </Step>
+  
+  <Step title="Application defaults">
+    Hardcoded in application code
+  </Step>
+</Steps>
+
+## Multiple Profiles
+
+Spring Cloud Config supports multiple active profiles:
+
+```bash
+SPRING_PROFILES_ACTIVE=dev,debug,logging
+```
+
+<Warning>
+When using multiple profiles, the **last profile has the highest precedence** for conflicting properties.
+</Warning>
+
+## Environment Variable Substitution
+
+All configuration files support environment variable substitution with default values:
+
+```yaml
+# Syntax: ${VARIABLE_NAME:default_value}
+datasource:
+  url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME}
+  username: ${DB_USERNAME}
+  password: ${DB_PASSWORD}
+```
+
+- **With default**: `${DB_HOST:localhost}` - uses `localhost` if `DB_HOST` is not set
+- **Without default**: `${DB_USERNAME}` - application fails to start if not set
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Use Base for Shared Config" icon="share-nodes">
+    Put common configurations that apply to all environments in base files
+  </Card>
+  
+  <Card title="Override Sparingly" icon="code-merge">
+    Only override what's different in profile-specific files
+  </Card>
+  
+  <Card title="Document Variables" icon="book">
+    Clearly document required environment variables and their purposes
+  </Card>
+  
+  <Card title="Provide Defaults" icon="shield-check">
+    Use default values for development convenience, but not for sensitive data
+  </Card>
+</CardGroup>
+
+## See Also
+
+<CardGroup cols={3}>
+  <Card title="Dev Environment" icon="flask" href="/environments/dev">
+    Development environment configurations
+  </Card>
+  
+  <Card title="Prod Environment" icon="server" href="/environments/prod">
+    Production environment configurations
+  </Card>
+  
+  <Card title="Environment Variables" icon="gear" href="/environments/variables">
+    Complete list of environment variables
+  </Card>
+</CardGroup>

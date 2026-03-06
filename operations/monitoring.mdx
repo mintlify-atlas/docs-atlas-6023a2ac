@@ -1,0 +1,494 @@
+---
+title: Monitoring & Observability
+description: Monitor Spring Cloud Config health, service configuration, and distributed tracing with Zipkin
+---
+
+## Overview
+
+SGIVU microservices use Spring Boot Actuator for health checks and metrics, combined with Zipkin for distributed tracing. This guide shows how to monitor the Config Server and microservices.
+
+## Spring Boot Actuator Configuration
+
+All microservices expose actuator endpoints for health monitoring and operational insights.
+
+### Production Configuration
+
+In production profiles, services expose minimal endpoints for security:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+```
+
+<Info>
+  The `show-details: never` setting prevents sensitive information from being exposed in health endpoint responses.
+</Info>
+
+### Development Configuration
+
+Development environments expose all actuator endpoints for debugging:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+```
+
+<Warning>
+  Never use `include: "*"` in production. It exposes sensitive endpoints like `/actuator/env`, `/actuator/beans`, and `/actuator/mappings`.
+</Warning>
+
+## Health Check Endpoints
+
+### Accessing Health Status
+
+Each microservice exposes a health check endpoint:
+
+<CardGroup cols={2}>
+  <Card title="Config Server" icon="server">
+    ```bash
+    curl http://localhost:8888/actuator/health
+    ```
+  </Card>
+  
+  <Card title="Discovery Server" icon="network-wired">
+    ```bash
+    curl http://localhost:8761/actuator/health
+    ```
+  </Card>
+  
+  <Card title="API Gateway" icon="gateway">
+    ```bash
+    curl http://localhost:8080/actuator/health
+    ```
+  </Card>
+  
+  <Card title="Auth Service" icon="shield-halved">
+    ```bash
+    curl http://localhost:9000/actuator/health
+    ```
+  </Card>
+</CardGroup>
+
+### Health Response Format
+
+**Production (show-details: never):**
+
+```json
+{
+  "status": "UP"
+}
+```
+
+**Development (show-details: always):**
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "db": {
+      "status": "UP",
+      "details": {
+        "database": "PostgreSQL",
+        "validationQuery": "isValid()"
+      }
+    },
+    "diskSpace": {
+      "status": "UP",
+      "details": {
+        "total": 250685575168,
+        "free": 150685575168,
+        "threshold": 10485760
+      }
+    },
+    "ping": {
+      "status": "UP"
+    },
+    "redis": {
+      "status": "UP",
+      "details": {
+        "version": "7.0.5"
+      }
+    }
+  }
+}
+```
+
+<Note>
+  Health status can be `UP`, `DOWN`, `OUT_OF_SERVICE`, or `UNKNOWN`. Services should be monitored for non-UP statuses.
+</Note>
+
+## Info Endpoint
+
+The `/actuator/info` endpoint provides application metadata:
+
+```bash
+curl http://localhost:8888/actuator/info
+```
+
+You can customize this endpoint by adding properties:
+
+```yaml
+info:
+  app:
+    name: ${spring.application.name}
+    version: @project.version@
+    environment: ${spring.profiles.active}
+```
+
+## Distributed Tracing with Zipkin
+
+### Zipkin Configuration
+
+All microservices are configured to send trace data to Zipkin:
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+### Understanding Sampling Probability
+
+The `probability` setting controls what percentage of requests are traced:
+
+<CardGroup cols={3}>
+  <Card title="0.1 (10%)" icon="gauge-low">
+    Production default - traces 1 in 10 requests to reduce overhead
+  </Card>
+  
+  <Card title="0.5 (50%)" icon="gauge">
+    Higher sampling for debugging issues in staging
+  </Card>
+  
+  <Card title="1.0 (100%)" icon="gauge-high">
+    Development - trace every request (high overhead)
+  </Card>
+</CardGroup>
+
+### Accessing Zipkin Dashboard
+
+Once Zipkin is running, access the dashboard:
+
+```bash
+open http://localhost:9411
+```
+
+### Trace Search and Analysis
+
+<Steps>
+  <Step title="Find Traces">
+    Search by service name, time range, or trace ID in the Zipkin UI.
+  </Step>
+  
+  <Step title="View Trace Timeline">
+    Click a trace to see the request flow across microservices with timing information.
+  </Step>
+  
+  <Step title="Identify Bottlenecks">
+    Look for spans with long durations to identify performance issues.
+  </Step>
+  
+  <Step title="Analyze Dependencies">
+    Use the Dependencies tab to visualize service communication patterns.
+  </Step>
+</Steps>
+
+### Example Trace Flow
+
+A typical request through SGIVU might create this trace:
+
+```
+1. sgivu-gateway        [200ms] - Client request received
+2. └─ sgivu-auth        [50ms]  - Token validation
+3.    └─ sgivu-user     [100ms] - Fetch user data
+4.       └─ PostgreSQL  [30ms]  - Database query
+```
+
+## Monitoring Config Server
+
+### Config Server Health
+
+The Config Server health includes Git repository connectivity:
+
+```bash
+curl http://localhost:8888/actuator/health
+```
+
+Response includes:
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "configServer": {
+      "status": "UP",
+      "details": {
+        "repositories": [
+          {
+            "name": "sgivu-config-repo",
+            "profiles": ["dev", "prod"],
+            "label": "main"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+<Warning>
+  If Config Server health is DOWN, microservices cannot fetch configuration and may fail to start.
+</Warning>
+
+### Monitoring Configuration Retrieval
+
+Test that services can retrieve their configuration:
+
+```bash
+# Fetch auth service dev config
+curl http://localhost:8888/sgivu-auth/dev
+
+# Fetch gateway service prod config
+curl http://localhost:8888/sgivu-gateway/prod
+
+# Fetch user service default config
+curl http://localhost:8888/sgivu-user/default
+```
+
+Successful responses indicate the Config Server is correctly serving configuration.
+
+## Service-Level Monitoring
+
+### Key Metrics by Service
+
+<Accordion title="sgivu-auth (Port 9000)">
+  **Key Metrics:**
+  - OAuth2 token generation rate
+  - JWT signing operations
+  - Session creation/validation
+  - Database connection pool usage
+  
+  **Health Dependencies:**
+  - PostgreSQL database
+  - JWT keystore availability
+  - Eureka registration
+</Accordion>
+
+<Accordion title="sgivu-gateway (Port 8080)">
+  **Key Metrics:**
+  - Request throughput and latency
+  - OAuth2 token relay success rate
+  - Redis session operations
+  - Circuit breaker status
+  
+  **Health Dependencies:**
+  - Redis connection
+  - Auth service availability
+  - Eureka service discovery
+</Accordion>
+
+<Accordion title="sgivu-user (Port 8081)">
+  **Key Metrics:**
+  - User lookup latency
+  - Database query performance
+  - Internal API call success rate
+  
+  **Health Dependencies:**
+  - PostgreSQL database
+  - Service internal authentication
+  - Eureka registration
+</Accordion>
+
+<Accordion title="sgivu-client (Port 8082)">
+  **Key Metrics:**
+  - Client data operations
+  - Database transaction rate
+  - API response times
+  
+  **Health Dependencies:**
+  - PostgreSQL database
+  - Service internal authentication
+  - Eureka registration
+</Accordion>
+
+<Accordion title="sgivu-vehicle (Port 8083)">
+  **Key Metrics:**
+  - Vehicle image upload success rate
+  - S3 operation latency
+  - File size and multipart upload metrics
+  
+  **Health Dependencies:**
+  - PostgreSQL database
+  - AWS S3 connectivity
+  - Service internal authentication
+</Accordion>
+
+## Logging Configuration
+
+### Production Logging
+
+Production services use INFO level logging:
+
+```yaml
+logging:
+  level:
+    root: INFO
+```
+
+### Development Debugging
+
+Development profiles enable detailed logging for troubleshooting:
+
+```yaml
+logging:
+  level:
+    com.sgivu.gateway.security: DEBUG
+    com.sgivu.gateway.controller: DEBUG
+    org.springframework.security.oauth2.client: DEBUG
+    org.springframework.security.web.server.authentication: DEBUG
+    org.springframework.session.web.server: DEBUG
+```
+
+<Info>
+  Debug logging is useful for tracing OAuth2 flows, session management, and security filters during development.
+</Info>
+
+## Automated Monitoring Setup
+
+### Docker Compose Health Checks
+
+Add health checks to your `docker-compose.yml`:
+
+```yaml
+services:
+  sgivu-config:
+    image: sgivu/config-server:latest
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8888/actuator/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+```
+
+### Kubernetes Probes
+
+For Kubernetes deployments:
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: sgivu-auth
+spec:
+  containers:
+  - name: auth
+    image: sgivu/auth-service:latest
+    livenessProbe:
+      httpGet:
+        path: /actuator/health
+        port: 9000
+      initialDelaySeconds: 60
+      periodSeconds: 10
+    readinessProbe:
+      httpGet:
+        path: /actuator/health
+        port: 9000
+      initialDelaySeconds: 30
+      periodSeconds: 5
+```
+
+## Monitoring Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Set Up Alerts" icon="bell">
+    Configure alerts for DOWN health status, high error rates, or slow response times.
+  </Card>
+  
+  <Card title="Monitor Dependencies" icon="diagram-project">
+    Track database connections, Redis availability, and Eureka registration status.
+  </Card>
+  
+  <Card title="Track Trends" icon="chart-line">
+    Collect metrics over time to identify gradual degradation or capacity issues.
+  </Card>
+  
+  <Card title="Correlate Logs" icon="magnifying-glass">
+    Use trace IDs to correlate logs across services when debugging issues.
+  </Card>
+</CardGroup>
+
+## Troubleshooting Common Issues
+
+### Service Reports DOWN
+
+<Steps>
+  <Step title="Check Actuator Health">
+    ```bash
+    curl http://localhost:8080/actuator/health
+    ```
+    Look at component status to identify which dependency is failing.
+  </Step>
+  
+  <Step title="Verify Dependencies">
+    Check that databases, Redis, and other services are running and accessible.
+  </Step>
+  
+  <Step title="Review Logs">
+    Look for connection errors, timeouts, or authentication failures in application logs.
+  </Step>
+  
+  <Step title="Test Config Retrieval">
+    Ensure the service can fetch its configuration from Config Server.
+  </Step>
+</Steps>
+
+### High Latency in Traces
+
+1. **Identify the slow span** in Zipkin
+2. **Check database query performance** if the slow span is a repository call
+3. **Review network latency** between services
+4. **Check resource utilization** (CPU, memory, disk I/O)
+
+### Missing Traces
+
+- Verify Zipkin is running and accessible
+- Check that `management.zipkin.tracing.endpoint` is correctly configured
+- Increase `sampling.probability` temporarily for debugging
+- Review service logs for Zipkin connection errors
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Configuration Refresh" href="/operations/refresh" icon="arrows-rotate">
+    Update monitoring configuration without restarts
+  </Card>
+  
+  <Card title="Security" href="/operations/security" icon="shield">
+    Secure actuator endpoints in production
+  </Card>
+  
+  <Card title="Validation" href="/operations/validation" icon="circle-check">
+    Validate configuration changes before deployment
+  </Card>
+  
+  <Card title="Troubleshooting" href="/operations/validation" icon="wrench">
+    Debug common configuration issues
+  </Card>
+</CardGroup>

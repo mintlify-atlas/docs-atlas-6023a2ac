@@ -1,0 +1,362 @@
+---
+title: 'Setup'
+description: 'Set up the SGIVU Config Server to serve centralized configuration to all microservices'
+icon: 'wrench'
+---
+
+<Info>
+  The SGIVU Config Repository is a Spring Cloud Config-based infrastructure project that centralizes configuration management for all SGIVU microservices across different environments.
+</Info>
+
+## Prerequisites
+
+Before setting up the Config Server, ensure you have the following installed:
+
+<CardGroup cols={2}>
+  <Card title="Java 17+" icon="java">
+    Required for running Spring Boot applications
+  </Card>
+  <Card title="Docker & Docker Compose" icon="docker">
+    For containerized deployment of services
+  </Card>
+  <Card title="Git" icon="git">
+    To clone and version the configuration repository
+  </Card>
+  <Card title="PostgreSQL" icon="database">
+    Database for microservices (Auth, User, Client, etc.)
+  </Card>
+</CardGroup>
+
+## Installation Steps
+
+<Steps>
+  <Step title="Clone the Config Repository">
+    Clone this repository to your local machine:
+
+    ```bash
+    git clone <repository-url> sgivu-config-repo
+    cd sgivu-config-repo
+    ```
+
+    This repository contains all YAML configuration files organized by service and environment:
+    - `{service}.yml` - Base configuration
+    - `{service}-dev.yml` - Development overrides
+    - `{service}-prod.yml` - Production overrides
+  </Step>
+
+  <Step title="Set Up Required Environment Variables">
+    The configuration files use environment variable placeholders that must be resolved. Create a `.env` file with the following variables:
+
+    <CodeGroup>
+    ```bash Development (.env)
+    # Database Configuration - Auth Service
+    DEV_AUTH_DB_HOST=localhost
+    DEV_AUTH_DB_PORT=5432
+    DEV_AUTH_DB_NAME=sgivu_auth
+    DEV_AUTH_DB_USERNAME=postgres
+    DEV_AUTH_DB_PASSWORD=your_password
+
+    # Database Configuration - User Service
+    DEV_USER_DB_HOST=localhost
+    DEV_USER_DB_PORT=5432
+    DEV_USER_DB_NAME=sgivu_user
+    DEV_USER_DB_USERNAME=postgres
+    DEV_USER_DB_PASSWORD=your_password
+
+    # Database Configuration - Client Service
+    DEV_CLIENT_DB_HOST=localhost
+    DEV_CLIENT_DB_PORT=5432
+    DEV_CLIENT_DB_NAME=sgivu_client
+    DEV_CLIENT_DB_USERNAME=postgres
+    DEV_CLIENT_DB_PASSWORD=your_password
+
+    # Redis Configuration (for Gateway sessions)
+    REDIS_HOST=localhost
+    REDIS_PORT=6379
+    REDIS_PASSWORD=your_redis_password
+
+    # Service URLs
+    EUREKA_URL=http://localhost:8761/eureka
+    SGIVU_AUTH_URL=http://localhost:9000
+    SGIVU_GATEWAY_URL=http://localhost:8080
+    DEV_ANGULAR_APP_URL=http://localhost:4200
+
+    # Security Configuration
+    SGIVU_GATEWAY_SECRET=your_gateway_client_secret
+    SERVICE_INTERNAL_SECRET_KEY=your_internal_service_key
+
+    # JWT Keystore Configuration
+    JWT_KEYSTORE_LOCATION=classpath:keystore.jks
+    JWT_KEYSTORE_PASSWORD=your_keystore_password
+    JWT_KEY_ALIAS=sgivu-jwt
+    JWT_KEY_PASSWORD=your_key_password
+
+    # Flyway
+    FLYWAY_BASELINE_ON_MIGRATE=false
+    ```
+
+    ```bash Production (.env)
+    # Use production values for all variables
+    # Databases should point to production instances
+    # Secrets should be managed via AWS Secrets Manager or similar
+    
+    DEV_AUTH_DB_HOST=prod-db-host
+    # ... (similar structure with production values)
+    ```
+    </CodeGroup>
+
+    <Warning>
+      **Never commit the `.env` file to version control.** Add it to `.gitignore` immediately. Use environment-specific secret management for production deployments.
+    </Warning>
+  </Step>
+
+  <Step title="Configure the Spring Cloud Config Server">
+    The Config Server (typically `sgivu-config`) must be configured to use this repository as its configuration source.
+
+    In the Config Server's `application.yml`, add:
+
+    ```yaml application.yml
+    spring:
+      application:
+        name: sgivu-config
+      cloud:
+        config:
+          server:
+            git:
+              uri: file:///path/to/sgivu-config-repo
+              # Or for remote repository:
+              # uri: https://github.com/your-org/sgivu-config-repo
+              # username: ${GIT_USERNAME}
+              # password: ${GIT_TOKEN}
+              default-label: main
+              clone-on-start: true
+              search-paths: .
+      profiles:
+        active: native  # Use 'native' for local file system
+
+    server:
+      port: 8888
+
+    eureka:
+      client:
+        service-url:
+          defaultZone: ${EUREKA_URL:http://localhost:8761/eureka}
+    ```
+
+    <Note>
+      For Docker deployments, use the Git URI approach. For local development, you can use `native` profile with a file path.
+    </Note>
+  </Step>
+
+  <Step title="Start the Config Server">
+    Start the Spring Cloud Config Server using Docker Compose:
+
+    ```bash
+    # From the sgivu-docker-compose directory
+    docker compose up -d sgivu-config
+    ```
+
+    Or run it locally with Maven/Gradle:
+
+    ```bash
+    # If running the Config Server standalone
+    ./mvnw spring-boot:run
+    # or
+    ./gradlew bootRun
+    ```
+
+    The Config Server will start on port `8888` by default.
+  </Step>
+
+  <Step title="Verify Configuration Endpoints">
+    Test that the Config Server is serving configurations correctly:
+
+    ```bash
+    # Test auth service configuration (dev profile)
+    curl http://localhost:8888/sgivu-auth/dev | jq
+
+    # Test gateway configuration (dev profile)
+    curl http://localhost:8888/sgivu-gateway/dev | jq
+
+    # Test user service configuration (default profile)
+    curl http://localhost:8888/sgivu-user/default | jq
+    ```
+
+    You should see JSON output with resolved configuration properties. The response will include:
+    - `name` - Service name
+    - `profiles` - Active profiles
+    - `propertySources` - Merged configuration from base + profile-specific files
+
+    <CodeGroup>
+    ```json Expected Response
+    {
+      "name": "sgivu-auth",
+      "profiles": ["dev"],
+      "label": null,
+      "version": "abc123",
+      "state": null,
+      "propertySources": [
+        {
+          "name": "file:///path/to/sgivu-config-repo/sgivu-auth-dev.yml",
+          "source": {
+            "spring.datasource.url": "jdbc:postgresql://localhost:5432/sgivu_auth",
+            "spring.jpa.hibernate.ddl-auto": "validate",
+            // ... more properties
+          }
+        }
+      ]
+    }
+    ```
+    </CodeGroup>
+  </Step>
+
+  <Step title="Configure Microservices to Use Config Server">
+    Each microservice needs to be configured to fetch its configuration from the Config Server.
+
+    Add to each service's `bootstrap.yml` or `application.yml`:
+
+    ```yaml bootstrap.yml
+    spring:
+      application:
+        name: sgivu-auth  # Must match config file name
+      cloud:
+        config:
+          uri: http://localhost:8888
+          # For Docker: http://sgivu-config:8888
+          fail-fast: true
+          retry:
+            max-attempts: 6
+            initial-interval: 1000
+            max-interval: 2000
+            multiplier: 1.1
+      profiles:
+        active: dev  # or prod
+    ```
+
+    <Info>
+      The `spring.application.name` must match the base name of the configuration file (e.g., `sgivu-auth` matches `sgivu-auth.yml` and `sgivu-auth-dev.yml`).
+    </Info>
+  </Step>
+</Steps>
+
+## Configuration File Structure
+
+The repository follows Spring Cloud Config naming conventions:
+
+```plaintext
+sgivu-config-repo/
+├── sgivu-auth.yml           # Base configuration for Auth service
+├── sgivu-auth-dev.yml       # Development overrides
+├── sgivu-auth-prod.yml      # Production overrides
+├── sgivu-gateway.yml        # Base configuration for Gateway
+├── sgivu-gateway-dev.yml
+├── sgivu-gateway-prod.yml
+├── sgivu-user.yml
+├── sgivu-user-dev.yml
+├── sgivu-user-prod.yml
+├── sgivu-client.yml
+├── sgivu-client-dev.yml
+├── sgivu-client-prod.yml
+├── sgivu-vehicle.yml
+├── sgivu-vehicle-dev.yml
+├── sgivu-vehicle-prod.yml
+├── sgivu-purchase-sale.yml
+├── sgivu-purchase-sale-dev.yml
+├── sgivu-purchase-sale-prod.yml
+├── sgivu-discovery.yml
+├── sgivu-discovery-dev.yml
+└── sgivu-discovery-prod.yml
+```
+
+<Note>
+  Spring Cloud Config merges configurations in order: base file → profile-specific file. Profile-specific values override base values.
+</Note>
+
+## Key Configuration Patterns
+
+### Environment Variable Placeholders
+
+All sensitive data uses Spring's property placeholder syntax:
+
+```yaml
+spring:
+  datasource:
+    url: jdbc:postgresql://${DEV_AUTH_DB_HOST:host.docker.internal}:${DEV_AUTH_DB_PORT:5432}/${DEV_AUTH_DB_NAME}
+    username: ${DEV_AUTH_DB_USERNAME}
+    password: ${DEV_AUTH_DB_PASSWORD}
+```
+
+Format: `${VAR_NAME:default_value}` or `${VAR_NAME}` (fails if not set)
+
+### Service Discovery Integration
+
+All services register with Eureka:
+
+```yaml
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+```
+
+### Management Endpoints
+
+Development profiles expose all actuator endpoints for debugging:
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"  # dev only
+  endpoint:
+    health:
+      show-details: always
+```
+
+## Security Best Practices
+
+<Warning>
+  **Critical Security Guidelines:**
+  - Never commit real secrets to YAML files
+  - Use environment variables or secret managers (AWS Secrets Manager, Vault, etc.)
+  - Keep the repository private with appropriate access controls
+  - Rotate secrets regularly
+  - Use different secrets for each environment
+</Warning>
+
+## Troubleshooting
+
+### Config Server Not Starting
+
+- Verify Git repository path or URL is correct
+- Check network connectivity if using remote Git
+- Ensure required environment variables are set
+- Check logs: `docker logs sgivu-config`
+
+### Services Can't Connect to Config Server
+
+- Verify Config Server is running: `curl http://localhost:8888/actuator/health`
+- Check `spring.cloud.config.uri` in service configuration
+- Ensure network connectivity (Docker network for containers)
+- Check service name matches configuration file name
+
+### Configuration Not Updating
+
+- Verify changes are committed and pushed (for Git backend)
+- Check Config Server logs for refresh events
+- Services may need restart or `/actuator/refresh` call
+- See [Local Development](/getting-started/local-development) for hot-reload setup
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development" icon="laptop-code" href="/getting-started/local-development">
+    Set up your local development environment with hot configuration reload
+  </Card>
+  <Card title="Configuration Reference" icon="book" href="/reference/spring-configuration">
+    Explore detailed configuration options for each service
+  </Card>
+</CardGroup>

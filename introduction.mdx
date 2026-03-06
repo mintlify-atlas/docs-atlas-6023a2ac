@@ -1,0 +1,143 @@
+---
+title: Introduction
+description: Centralized Spring Cloud Config repository for SGIVU microservices architecture
+---
+
+# Welcome to SGIVU Config Repository
+
+The SGIVU Config Repository is the centralized configuration management system for the SGIVU microservices ecosystem. It serves as the single source of truth for all service configurations across development, production, and other environments.
+
+<CardGroup cols={2}>
+  <Card title="Quick Setup" icon="rocket" href="/getting-started/setup">
+    Get started with the config repository in minutes
+  </Card>
+  <Card title="Architecture" icon="sitemap" href="/architecture">
+    Understand the Spring Cloud Config architecture
+  </Card>
+  <Card title="Service Configurations" icon="server" href="/services/overview">
+    Explore individual microservice configurations
+  </Card>
+  <Card title="Environment Management" icon="layer-group" href="/environments/overview">
+    Manage dev, prod, and custom environments
+  </Card>
+</CardGroup>
+
+## What is SGIVU Config Repository?
+
+This repository contains YAML configuration files that are consumed by the Spring Cloud Config Server (`sgivu-config`). Each microservice in the SGIVU ecosystem retrieves its configuration from this centralized location, enabling:
+
+- **Version Control**: Track all configuration changes through Git history
+- **Environment Separation**: Maintain distinct configurations for dev, prod, and other environments
+- **Consistency**: Ensure all services use coordinated configuration values
+- **Security**: Centralize secret management with environment variable placeholders
+
+## Key Features
+
+<CardGroup cols={3}>
+  <Card title="Multi-Environment" icon="code-branch">
+    Support for default, dev, and prod profiles with override capabilities
+  </Card>
+  <Card title="Spring Cloud Native" icon="cloud">
+    Seamless integration with Spring Cloud Config Server
+  </Card>
+  <Card title="OAuth2 Ready" icon="shield-halved">
+    Pre-configured OAuth2 authorization server setup
+  </Card>
+  <Card title="Service Discovery" icon="compass">
+    Eureka service registry configuration included
+  </Card>
+  <Card title="Database Migrations" icon="database">
+    Flyway migration settings for all data services
+  </Card>
+  <Card title="Observability" icon="chart-line">
+    Distributed tracing with Zipkin and health monitoring
+  </Card>
+</CardGroup>
+
+## Architecture Overview
+
+The config repository follows Spring Cloud Config's naming convention:
+
+```
+{application-name}.yml          # Base configuration
+{application-name}-{profile}.yml # Environment-specific overrides
+```
+
+Each microservice fetches its configuration at startup by requesting:
+- Base configuration from `{application-name}.yml`
+- Profile-specific overrides from `{application-name}-{profile}.yml`
+
+<Note>
+Configuration values can be refreshed without service restarts using Spring Cloud Bus and the `/actuator/refresh` endpoint.
+</Note>
+
+## Microservices Configured
+
+The repository manages configuration for these SGIVU services:
+
+| Service | Port | Purpose |
+|---------|------|---------|
+| **sgivu-discovery** | 8761 | Eureka service registry |
+| **sgivu-auth** | 9000 | OAuth2 authorization server |
+| **sgivu-gateway** | 8080 | API gateway and session management |
+| **sgivu-user** | 8081 | User management service |
+| **sgivu-client** | 8082 | Client management service |
+| **sgivu-vehicle** | 8083 | Vehicle management with S3 integration |
+| **sgivu-purchase-sale** | 8084 | Purchase and sale orchestration |
+
+## Getting Started
+
+<Steps>
+  <Step title="Clone the repository">
+    Clone this config repository to your local machine
+    ```bash
+    git clone https://github.com/stevenrq/sgivu-config-repo.git
+    cd sgivu-config-repo
+    ```
+  </Step>
+  
+  <Step title="Set up Config Server">
+    Configure your Spring Cloud Config Server to point to this repository
+    ```yaml
+    spring:
+      cloud:
+        config:
+          server:
+            git:
+              uri: https://github.com/stevenrq/sgivu-config-repo
+    ```
+  </Step>
+  
+  <Step title="Configure environment variables">
+    Set required environment variables for secrets and environment-specific values
+    ```bash
+    export REDIS_PASSWORD=your_redis_password
+    export SGIVU_GATEWAY_SECRET=your_gateway_secret
+    export SERVICE_INTERNAL_SECRET_KEY=your_internal_secret
+    ```
+  </Step>
+  
+  <Step title="Start services">
+    Launch your microservices with the appropriate Spring profile
+    ```bash
+    java -jar sgivu-auth.jar --spring.profiles.active=dev
+    ```
+  </Step>
+</Steps>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Local Development Setup" icon="laptop-code" href="/getting-started/local-development">
+    Configure your local development environment
+  </Card>
+  <Card title="Security Best Practices" icon="lock" href="/operations/security">
+    Learn about secret management and security
+  </Card>
+  <Card title="Configuration Reference" icon="book" href="/reference/spring-configuration">
+    Explore common Spring configuration patterns
+  </Card>
+  <Card title="Operations Guide" icon="gears" href="/operations/monitoring">
+    Monitor and maintain your configuration
+  </Card>
+</CardGroup>

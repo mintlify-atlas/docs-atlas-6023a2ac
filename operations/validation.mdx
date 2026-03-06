@@ -1,0 +1,570 @@
+---
+title: Configuration Validation
+description: Validate YAML syntax and test configuration changes before deploying to production
+---
+
+## Overview
+
+Proper validation prevents configuration errors that can cause service failures or security vulnerabilities. This guide covers tools and techniques for validating the SGIVU config repository.
+
+<Warning>
+  Invalid YAML syntax or missing required properties can prevent services from starting. Always validate before merging configuration changes.
+</Warning>
+
+## YAML Syntax Validation
+
+### Using yamllint
+
+The `yamllint` tool checks YAML syntax and formatting:
+
+```bash
+# Install yamllint
+pip install yamllint
+
+# Or with apt
+sudo apt-get install yamllint
+```
+
+### Validating Configuration Files
+
+<Steps>
+  <Step title="Navigate to Config Repository">
+    ```bash
+    cd ~/workspace/source
+    ```
+  </Step>
+  
+  <Step title="Run yamllint">
+    ```bash
+    yamllint *.yml
+    ```
+    
+    No output means all files are valid. Errors will be reported with line numbers:
+    
+    ```
+    sgivu-auth-dev.yml
+      12:1      error    too many blank lines (3 > 2)  (empty-lines)
+      23:81     error    line too long (87 > 80 characters)  (line-length)
+    ```
+  </Step>
+  
+  <Step title="Fix Reported Issues">
+    Address any syntax errors or formatting issues before committing.
+  </Step>
+</Steps>
+
+### yamllint Configuration
+
+Create a `.yamllint` file in the repository root to customize validation rules:
+
+```yaml
+extends: default
+
+rules:
+  line-length:
+    max: 120
+    level: warning
+  indentation:
+    spaces: 2
+    indent-sequences: true
+  comments:
+    min-spaces-from-content: 1
+  empty-lines:
+    max: 2
+```
+
+<Info>
+  Adjust rules based on your team's coding standards. The above configuration is more lenient than yamllint defaults.
+</Info>
+
+## Testing Configuration Locally
+
+### Starting the Config Server
+
+Before testing, ensure the Config Server is running and pointing to your local repository:
+
+```bash
+# Using docker-compose from sgivu-docker-compose
+cd ../sgivu/infra/compose/sgivu-docker-compose
+docker compose up -d sgivu-config
+
+# Verify it's running
+docker compose ps sgivu-config
+```
+
+### Verifying Config Server Setup
+
+Check that the Config Server can access the Git repository:
+
+```bash
+curl http://localhost:8888/actuator/health
+```
+
+Expected response:
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "configServer": {
+      "status": "UP",
+      "details": {
+        "repositories": [
+          {
+            "name": "sgivu-config-repo",
+            "profiles": ["dev", "prod"],
+            "label": "main"
+          }
+        ]
+      }
+    }
+  }
+}
+```
+
+## Testing Configuration Retrieval
+
+### Testing Service Configurations
+
+Use curl to fetch configuration and verify it's correct:
+
+<CodeGroup>
+```bash Auth Service (Dev)
+curl http://localhost:8888/sgivu-auth/dev
+```
+
+```bash Gateway (Default)
+curl http://localhost:8888/sgivu-gateway/default
+```
+
+```bash User Service (Prod)
+curl http://localhost:8888/sgivu-user/prod
+```
+
+```bash Vehicle Service (Dev)
+curl http://localhost:8888/sgivu-vehicle/dev
+```
+</CodeGroup>
+
+### Understanding the Response
+
+The Config Server returns merged configuration from base and profile-specific files:
+
+```json
+{
+  "name": "sgivu-auth",
+  "profiles": ["dev"],
+  "label": null,
+  "version": "abc123def",
+  "state": null,
+  "propertySources": [
+    {
+      "name": "file:///config-repo/sgivu-auth-dev.yml",
+      "source": {
+        "spring.datasource.url": "jdbc:postgresql://host.docker.internal:5432/sgivu_auth_dev",
+        "management.endpoint.health.show-details": "always"
+      }
+    },
+    {
+      "name": "file:///config-repo/sgivu-auth.yml",
+      "source": {
+        "server.port": 9000,
+        "management.endpoints.web.exposure.include": "health, info",
+        "management.tracing.sampling.probability": 0.1
+      }
+    }
+  ]
+}
+```
+
+<Note>
+  Configuration from profile-specific files (e.g., `-dev.yml`) overrides values from base files.
+</Note>
+
+## Validating Specific Properties
+
+### Extracting Property Values
+
+Use `jq` to extract specific properties for validation:
+
+```bash
+# Install jq if needed
+sudo apt-get install jq
+
+# Check database URL
+curl -s http://localhost:8888/sgivu-auth/dev | \
+  jq '.propertySources[].source["spring.datasource.url"]' | \
+  grep -v null
+
+# Verify Zipkin endpoint
+curl -s http://localhost:8888/sgivu-gateway/default | \
+  jq '.propertySources[].source["management.zipkin.tracing.endpoint"]' | \
+  grep -v null
+
+# Check Eureka URL
+curl -s http://localhost:8888/sgivu-user/dev | \
+  jq '.propertySources[].source["eureka.client.service-url.defaultZone"]' | \
+  grep -v null
+```
+
+### Validating Required Properties
+
+Create a validation script to check that required properties are set:
+
+```bash
+#!/bin/bash
+# validate-config.sh
+
+SERVICE=$1
+PROFILE=$2
+
+echo "Validating $SERVICE configuration for profile $PROFILE..."
+
+# Fetch configuration
+CONFIG=$(curl -s http://localhost:8888/$SERVICE/$PROFILE)
+
+# Check for required properties
+REQUIRED_PROPS=(
+  "server.port"
+  "spring.application.name"
+  "eureka.client.service-url.defaultZone"
+)
+
+for PROP in "${REQUIRED_PROPS[@]}"; do
+  VALUE=$(echo $CONFIG | jq -r ".propertySources[].source[\"$PROP\"]" | grep -v null | head -1)
+  if [ -z "$VALUE" ]; then
+    echo "❌ Missing required property: $PROP"
+    exit 1
+  else
+    echo "✅ $PROP = $VALUE"
+  fi
+done
+
+echo "Validation successful!"
+```
+
+Usage:
+
+```bash
+chmod +x validate-config.sh
+./validate-config.sh sgivu-auth dev
+```
+
+## Pre-Commit Validation
+
+### Git Pre-Commit Hook
+
+Automate validation before commits using a Git hook:
+
+```bash
+#!/bin/bash
+# .git/hooks/pre-commit
+
+echo "Running YAML validation..."
+
+# Get list of staged YAML files
+YAML_FILES=$(git diff --cached --name-only --diff-filter=ACM | grep '\.ya\?ml$')
+
+if [ -z "$YAML_FILES" ]; then
+  exit 0
+fi
+
+# Run yamllint on staged files
+echo "$YAML_FILES" | xargs yamllint
+
+if [ $? -ne 0 ]; then
+  echo "❌ YAML validation failed. Please fix errors before committing."
+  exit 1
+fi
+
+echo "✅ YAML validation passed"
+exit 0
+```
+
+Make it executable:
+
+```bash
+chmod +x .git/hooks/pre-commit
+```
+
+<Info>
+  This hook runs automatically before every commit, preventing invalid YAML from being committed.
+</Info>
+
+## Pre-Merge Validation Checklist
+
+Before merging configuration changes to main:
+
+<Steps>
+  <Step title="YAML Syntax">
+    - [ ] All YAML files pass `yamllint` validation
+    - [ ] Indentation is consistent (2 spaces)
+    - [ ] No trailing whitespace
+    - [ ] Proper quoting for special characters
+  </Step>
+  
+  <Step title="Security">
+    - [ ] No plain-text secrets or passwords
+    - [ ] All sensitive values use `${VAR_NAME}` placeholders
+    - [ ] Environment variables are documented
+    - [ ] `.env` files are in `.gitignore`
+  </Step>
+  
+  <Step title="Configuration">
+    - [ ] Required properties are present for each service
+    - [ ] Port numbers don't conflict
+    - [ ] Service URLs are correct for the environment
+    - [ ] Profile-specific overrides are intentional
+  </Step>
+  
+  <Step title="Testing">
+    - [ ] Config Server can retrieve configuration
+    - [ ] Target service starts with new configuration
+    - [ ] Application functionality works as expected
+    - [ ] Health checks pass
+  </Step>
+  
+  <Step title="Documentation">
+    - [ ] Commit message explains what changed and why
+    - [ ] Breaking changes are documented
+    - [ ] PR includes testing instructions
+  </Step>
+</Steps>
+
+## Testing Configuration Changes
+
+### Local Development Workflow
+
+<Steps>
+  <Step title="Make Configuration Changes">
+    Edit the relevant YAML files in `~/workspace/source`:
+    
+    ```bash
+    cd ~/workspace/source
+    vim sgivu-auth-dev.yml
+    ```
+  </Step>
+  
+  <Step title="Validate Syntax">
+    ```bash
+    yamllint sgivu-auth-dev.yml
+    ```
+  </Step>
+  
+  <Step title="Commit Locally">
+    ```bash
+    git add sgivu-auth-dev.yml
+    git commit -m "Update auth service database pool size"
+    ```
+  </Step>
+  
+  <Step title="Test with Config Server">
+    If using a local file-based Config Server, refresh it:
+    
+    ```bash
+    docker restart sgivu-config
+    ```
+    
+    Then verify the change:
+    
+    ```bash
+    curl http://localhost:8888/sgivu-auth/dev | jq
+    ```
+  </Step>
+  
+  <Step title="Test with Service">
+    Restart or refresh the service:
+    
+    ```bash
+    docker restart sgivu-auth
+    # Or use /actuator/refresh if supported
+    ```
+    
+    Check that it starts successfully:
+    
+    ```bash
+    docker logs sgivu-auth
+    curl http://localhost:9000/actuator/health
+    ```
+  </Step>
+  
+  <Step title="Push to Remote">
+    Once validated locally:
+    
+    ```bash
+    git push origin feature/update-auth-config
+    ```
+  </Step>
+</Steps>
+
+## Common Validation Errors
+
+### YAML Syntax Errors
+
+<Accordion title="Indentation Error">
+  **Error:**
+  ```
+  mapping values are not allowed here
+  ```
+  
+  **Cause:** Inconsistent indentation or missing space after colon.
+  
+  **Fix:**
+  ```yaml
+  # ❌ Wrong
+  spring:
+    datasource:
+      url:jdbc:postgresql://localhost:5432/db
+  
+  # ✅ Correct
+  spring:
+    datasource:
+      url: jdbc:postgresql://localhost:5432/db
+  ```
+</Accordion>
+
+<Accordion title="Unquoted Special Characters">
+  **Error:**
+  ```
+  could not find expected ':'
+  ```
+  
+  **Cause:** Special characters in values need quoting.
+  
+  **Fix:**
+  ```yaml
+  # ❌ Wrong
+  secret-key: ${SERVICE_SECRET}
+  
+  # ✅ Correct
+  secret-key: "${SERVICE_SECRET}"
+  ```
+</Accordion>
+
+<Accordion title="Duplicate Keys">
+  **Error:**
+  ```
+  found duplicate key
+  ```
+  
+  **Cause:** Same key defined multiple times at the same level.
+  
+  **Fix:** Remove or merge the duplicate keys.
+</Accordion>
+
+### Configuration Errors
+
+<Accordion title="Missing Required Property">
+  **Symptom:** Service fails to start with error like:
+  ```
+  Binding to target failed: Property 'spring.datasource.url' is required
+  ```
+  
+  **Solution:** Add the required property or provide a default value:
+  ```yaml
+  spring:
+    datasource:
+      url: ${DB_URL:jdbc:postgresql://localhost:5432/defaultdb}
+  ```
+</Accordion>
+
+<Accordion title="Environment Variable Not Resolved">
+  **Symptom:** Service uses literal `${VAR_NAME}` instead of the value.
+  
+  **Solution:** 
+  1. Verify the environment variable is set
+  2. Check that Spring Boot can access it
+  3. Provide a default value: `${VAR_NAME:default_value}`
+</Accordion>
+
+## Automated Validation in CI/CD
+
+### GitHub Actions Example
+
+Add automated validation to your CI pipeline:
+
+```yaml
+name: Validate Configuration
+
+on:
+  pull_request:
+    paths:
+      - '**.yml'
+      - '**.yaml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Install yamllint
+        run: pip install yamllint
+      
+      - name: Validate YAML syntax
+        run: yamllint *.yml
+      
+      - name: Start Config Server
+        run: |
+          docker run -d -p 8888:8888 \
+            -v $PWD:/config-repo \
+            -e SPRING_CLOUD_CONFIG_SERVER_GIT_URI=file:///config-repo \
+            hyness/spring-cloud-config-server:latest
+          sleep 10
+      
+      - name: Test configuration retrieval
+        run: |
+          services=("sgivu-auth" "sgivu-gateway" "sgivu-user" "sgivu-client" "sgivu-vehicle")
+          for service in "${services[@]}"; do
+            echo "Testing $service..."
+            curl -f http://localhost:8888/$service/dev || exit 1
+          done
+```
+
+## Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Validate Early" icon="bolt">
+    Run yamllint before committing. Use pre-commit hooks to enforce this.
+  </Card>
+  
+  <Card title="Test Locally" icon="laptop">
+    Always test configuration changes with Config Server and target services before pushing.
+  </Card>
+  
+  <Card title="Automate Checks" icon="robot">
+    Use CI/CD pipelines to automatically validate all configuration changes.
+  </Card>
+  
+  <Card title="Document Changes" icon="book">
+    Explain why configuration changed in commit messages and pull requests.
+  </Card>
+  
+  <Card title="Use Version Control" icon="code-branch">
+    Leverage Git history to track configuration changes over time.
+  </Card>
+  
+  <Card title="Review Together" icon="users">
+    Require peer review for production configuration changes.
+  </Card>
+</CardGroup>
+
+## Related Resources
+
+<CardGroup cols={2}>
+  <Card title="Security" href="/operations/security" icon="shield">
+    Validate that secrets are not committed
+  </Card>
+  
+  <Card title="Configuration Refresh" href="/operations/refresh" icon="arrows-rotate">
+    Apply validated changes without restarts
+  </Card>
+  
+  <Card title="Testing Changes" href="/operations/validation" icon="vial">
+    Comprehensive guide to testing configuration
+  </Card>
+  
+  <Card title="Troubleshooting" href="/operations/validation" icon="wrench">
+    Debug configuration issues
+  </Card>
+</CardGroup>

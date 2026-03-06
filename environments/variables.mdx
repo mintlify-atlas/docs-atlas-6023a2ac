@@ -1,0 +1,710 @@
+---
+title: 'Environment Variables Reference'
+description: 'Complete list of all environment variables used across SGIVU microservices'
+icon: 'gear'
+---
+
+## Overview
+
+This page documents all environment variables used across the SGIVU microservices architecture. Variables follow the format `${VAR_NAME:default_value}` where `:default_value` is optional.
+
+<Info>
+Variables without default values are **required** and will cause startup failure if not set.
+</Info>
+
+## Variable Format
+
+Spring Boot configuration files use the following syntax:
+
+```yaml
+# Variable with default value
+server:
+  port: ${PORT:8080}
+
+# Required variable (no default)
+datasource:
+  password: ${DB_PASSWORD}
+
+# Variable in interpolated string
+datasource:
+  url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME}
+```
+
+## Common Variables (All Services)
+
+These variables are used across multiple services in base configuration files.
+
+### Service Discovery
+
+<ParamField path="EUREKA_URL" type="string" default="http://sgivu-discovery:8761/eureka">
+  Eureka service registry URL. All microservices register with Eureka for service discovery.
+  
+  **Example values:**
+  - Dev: `http://localhost:8761/eureka`
+  - Prod: `http://eureka-server.sgivu.internal:8761/eureka`
+</ParamField>
+
+### Service URLs
+
+<ParamField path="SGIVU_AUTH_URL" type="string" default="http://sgivu-auth:9000">
+  Authorization server URL for OAuth2 authentication.
+  
+  **Used by:** Gateway, User, Client, Vehicle, Purchase-Sale services
+</ParamField>
+
+<ParamField path="SGIVU_GATEWAY_URL" type="string" default="http://sgivu-gateway:8080">
+  API Gateway URL.
+  
+  **Used by:** Auth service
+</ParamField>
+
+<ParamField path="SGIVU_USER_URL" type="string" default="http://sgivu-user:8081">
+  User service URL for internal service-to-service calls.
+  
+  **Used by:** Auth, Purchase-Sale services
+</ParamField>
+
+<ParamField path="SGIVU_CLIENT_URL" type="string" default="http://sgivu-client:8082">
+  Client service URL.
+  
+  **Used by:** Purchase-Sale service
+</ParamField>
+
+<ParamField path="SGIVU_VEHICLE_URL" type="string" default="http://sgivu-vehicle:8083">
+  Vehicle service URL.
+  
+  **Used by:** Purchase-Sale service
+</ParamField>
+
+### Security
+
+<ParamField path="SERVICE_INTERNAL_SECRET_KEY" type="string" required>
+  Shared secret for internal service-to-service authentication. **No default value.**
+  
+  **Used by:** Auth, User, Client, Vehicle, Purchase-Sale services
+  
+  **Security requirements:**
+  - Minimum 64 characters
+  - Cryptographically random
+  - Different per environment
+  - Rotated periodically
+  
+  **Example generation:**
+  ```bash
+  openssl rand -base64 64 | tr -d '\n'
+  ```
+</ParamField>
+
+<ParamField path="SGIVU_GATEWAY_SECRET" type="string" required>
+  OAuth2 client secret for gateway-auth communication. **No default value.**
+  
+  **Used by:** Auth service (server), Gateway service (client)
+  
+  **Security requirements:**
+  - Minimum 32 characters
+  - Keep in sync between auth and gateway
+  - Store in secrets management system
+</ParamField>
+
+### Server Configuration
+
+<ParamField path="PORT" type="integer" default="varies by service">
+  HTTP server port for the service.
+  
+  **Default ports:**
+  - Gateway: `8080`
+  - User: `8081`
+  - Client: `8082`
+  - Vehicle: `8083`
+  - Purchase-Sale: `8084`
+  - Auth: `9000`
+  - Discovery: `8761`
+</ParamField>
+
+<ParamField path="ISSUER_URL" type="string" default="http://sgivu-auth:9000">
+  OAuth2 issuer URL for JWT token validation.
+  
+  **Used by:** Auth service
+</ParamField>
+
+### Flyway Migrations
+
+<ParamField path="FLYWAY_BASELINE_ON_MIGRATE" type="boolean" default="false">
+  Whether Flyway should baseline an existing database.
+  
+  **Usage:**
+  - Dev: `true` (allows migrations on existing schemas)
+  - Prod: `false` (requires explicit baseline)
+  
+  **Used by:** All services with databases
+</ParamField>
+
+## Auth Service Variables
+
+### Database (Dev)
+
+<ParamField path="DEV_AUTH_DB_HOST" type="string" default="host.docker.internal">
+  PostgreSQL host for auth service in dev environment.
+</ParamField>
+
+<ParamField path="DEV_AUTH_DB_PORT" type="string" default="5432">
+  PostgreSQL port for auth service in dev environment.
+</ParamField>
+
+<ParamField path="DEV_AUTH_DB_NAME" type="string" required>
+  Database name for auth service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_AUTH_DB_USERNAME" type="string" required>
+  Database username for auth service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_AUTH_DB_PASSWORD" type="string" required>
+  Database password for auth service in dev. **No default value.**
+</ParamField>
+
+### Database (Prod)
+
+<ParamField path="PROD_AUTH_DB_HOST" type="string" default="host.docker.internal">
+  PostgreSQL host for auth service in production.
+</ParamField>
+
+<ParamField path="PROD_AUTH_DB_PORT" type="string" default="5432">
+  PostgreSQL port for auth service in production.
+</ParamField>
+
+<ParamField path="PROD_AUTH_DB_NAME" type="string" required>
+  Database name for auth service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_AUTH_DB_USERNAME" type="string" required>
+  Database username for auth service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_AUTH_DB_PASSWORD" type="string" required>
+  Database password for auth service in production. **No default value.**
+</ParamField>
+
+### JWT Configuration
+
+<ParamField path="JWT_KEYSTORE_LOCATION" type="string" required>
+  File path or classpath location of the JWT signing keystore. **No default value.**
+  
+  **Example values:**
+  - `file:/etc/sgivu/jwt-keystore.jks`
+  - `classpath:keystore/jwt.jks`
+  
+  **Security:** Store keystore file outside application JAR in production.
+</ParamField>
+
+<ParamField path="JWT_KEYSTORE_PASSWORD" type="string" required>
+  Password for the JWT keystore file. **No default value.**
+</ParamField>
+
+<ParamField path="JWT_KEY_ALIAS" type="string" required>
+  Alias of the signing key within the keystore. **No default value.**
+</ParamField>
+
+<ParamField path="JWT_KEY_PASSWORD" type="string" required>
+  Password for the signing key. **No default value.**
+</ParamField>
+
+### Application URLs
+
+<ParamField path="DEV_ANGULAR_APP_URL" type="string" required>
+  Angular frontend URL in dev environment. **No default value.**
+  
+  **Example:** `http://localhost:4200`
+  
+  **Used for:** OAuth redirects, CORS configuration
+</ParamField>
+
+<ParamField path="PROD_ANGULAR_APP_URL" type="string" required>
+  Angular frontend URL in production. **No default value.**
+  
+  **Example:** `https://app.sgivu.com`
+</ParamField>
+
+<ParamField path="OPENAPI_SERVER_URL" type="string" required>
+  Base URL for OpenAPI "Try it out" feature in production. **No default value.**
+  
+  **Example:** `https://api.sgivu.com`
+  
+  **Used by:** Auth, User, Client, Vehicle, Purchase-Sale services (prod only)
+</ParamField>
+
+## Gateway Service Variables
+
+### Redis Session Store
+
+<ParamField path="REDIS_HOST" type="string" default="sgivu-redis">
+  Redis server hostname for session management.
+  
+  **Production:** Use managed Redis service (ElastiCache, Redis Cloud, etc.)
+</ParamField>
+
+<ParamField path="REDIS_PORT" type="string" default="6379">
+  Redis server port.
+</ParamField>
+
+<ParamField path="REDIS_PASSWORD" type="string" required>
+  Redis authentication password. **No default value.**
+  
+  **Security:** Always set a strong password for Redis in all environments.
+</ParamField>
+
+## User Service Variables
+
+### Database (Dev)
+
+<ParamField path="DEV_USER_DB_HOST" type="string" default="host.docker.internal">
+  PostgreSQL host for user service in dev.
+</ParamField>
+
+<ParamField path="DEV_USER_DB_PORT" type="string" default="5432">
+  PostgreSQL port for user service in dev.
+</ParamField>
+
+<ParamField path="DEV_USER_DB_NAME" type="string" required>
+  Database name for user service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_USER_DB_USERNAME" type="string" required>
+  Database username for user service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_USER_DB_PASSWORD" type="string" required>
+  Database password for user service in dev. **No default value.**
+</ParamField>
+
+### Database (Prod)
+
+<ParamField path="PROD_USER_DB_HOST" type="string" required>
+  PostgreSQL host for user service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_USER_DB_PORT" type="string" required>
+  PostgreSQL port for user service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_USER_DB_NAME" type="string" required>
+  Database name for user service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_USER_DB_USERNAME" type="string" required>
+  Database username for user service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_USER_DB_PASSWORD" type="string" required>
+  Database password for user service in production. **No default value.**
+</ParamField>
+
+## Client Service Variables
+
+### Database (Dev)
+
+<ParamField path="DEV_CLIENT_DB_HOST" type="string" default="host.docker.internal">
+  PostgreSQL host for client service in dev.
+</ParamField>
+
+<ParamField path="DEV_CLIENT_DB_PORT" type="string" default="5432">
+  PostgreSQL port for client service in dev.
+</ParamField>
+
+<ParamField path="DEV_CLIENT_DB_NAME" type="string" required>
+  Database name for client service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_CLIENT_DB_USERNAME" type="string" required>
+  Database username for client service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_CLIENT_DB_PASSWORD" type="string" required>
+  Database password for client service in dev. **No default value.**
+</ParamField>
+
+### Database (Prod)
+
+<ParamField path="PROD_CLIENT_DB_HOST" type="string" required>
+  PostgreSQL host for client service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_CLIENT_DB_PORT" type="string" required>
+  PostgreSQL port for client service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_CLIENT_DB_NAME" type="string" required>
+  Database name for client service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_CLIENT_DB_USERNAME" type="string" required>
+  Database username for client service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_CLIENT_DB_PASSWORD" type="string" required>
+  Database password for client service in production. **No default value.**
+</ParamField>
+
+## Vehicle Service Variables
+
+### Database (Dev)
+
+<ParamField path="DEV_VEHICLE_DB_HOST" type="string" default="host.docker.internal">
+  PostgreSQL host for vehicle service in dev.
+</ParamField>
+
+<ParamField path="DEV_VEHICLE_DB_PORT" type="string" default="5432">
+  PostgreSQL port for vehicle service in dev.
+</ParamField>
+
+<ParamField path="DEV_VEHICLE_DB_NAME" type="string" required>
+  Database name for vehicle service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_VEHICLE_DB_USERNAME" type="string" required>
+  Database username for vehicle service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_VEHICLE_DB_PASSWORD" type="string" required>
+  Database password for vehicle service in dev. **No default value.**
+</ParamField>
+
+### Database (Prod)
+
+<ParamField path="PROD_VEHICLE_DB_HOST" type="string" required>
+  PostgreSQL host for vehicle service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_VEHICLE_DB_PORT" type="string" required>
+  PostgreSQL port for vehicle service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_VEHICLE_DB_NAME" type="string" required>
+  Database name for vehicle service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_VEHICLE_DB_USERNAME" type="string" required>
+  Database username for vehicle service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_VEHICLE_DB_PASSWORD" type="string" required>
+  Database password for vehicle service in production. **No default value.**
+</ParamField>
+
+### AWS S3 Configuration
+
+<ParamField path="AWS_VEHICLES_BUCKET" type="string" required>
+  S3 bucket name for vehicle images. **No default value.**
+  
+  **Example:** `sgivu-vehicle-images-prod`
+  
+  **Permissions required:**
+  - `s3:PutObject`
+  - `s3:GetObject`
+  - `s3:DeleteObject`
+  - `s3:ListBucket`
+</ParamField>
+
+<ParamField path="AWS_S3_ALLOWED_ORIGINS" type="string" default="http://localhost:4200,https://localhost:4200">
+  Comma-separated list of allowed CORS origins for S3 bucket.
+  
+  **Production example:** `https://app.sgivu.com,https://www.sgivu.com`
+</ParamField>
+
+<ParamField path="AWS_ACCESS_KEY" type="string" required>
+  AWS IAM access key ID. **No default value.**
+  
+  **Best practice:** Use IAM roles instead of access keys when running on AWS infrastructure.
+</ParamField>
+
+<ParamField path="AWS_SECRET_KEY" type="string" required>
+  AWS IAM secret access key. **No default value.**
+  
+  **Security:** Never commit this value to version control.
+</ParamField>
+
+<ParamField path="AWS_REGION" type="string" required>
+  AWS region for S3 bucket. **No default value.**
+  
+  **Example:** `us-east-1`, `eu-west-1`
+</ParamField>
+
+## Purchase Sale Service Variables
+
+### Database (Dev)
+
+<ParamField path="DEV_PURCHASE_SALE_DB_HOST" type="string" default="host.docker.internal">
+  PostgreSQL host for purchase-sale service in dev.
+</ParamField>
+
+<ParamField path="DEV_PURCHASE_SALE_DB_PORT" type="string" default="5432">
+  PostgreSQL port for purchase-sale service in dev.
+</ParamField>
+
+<ParamField path="DEV_PURCHASE_SALE_DB_NAME" type="string" required>
+  Database name for purchase-sale service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_PURCHASE_SALE_DB_USERNAME" type="string" required>
+  Database username for purchase-sale service in dev. **No default value.**
+</ParamField>
+
+<ParamField path="DEV_PURCHASE_SALE_DB_PASSWORD" type="string" required>
+  Database password for purchase-sale service in dev. **No default value.**
+</ParamField>
+
+### Database (Prod)
+
+<ParamField path="PROD_PURCHASE_SALE_DB_HOST" type="string" required>
+  PostgreSQL host for purchase-sale service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_PURCHASE_SALE_DB_PORT" type="string" required>
+  PostgreSQL port for purchase-sale service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_PURCHASE_SALE_DB_NAME" type="string" required>
+  Database name for purchase-sale service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_PURCHASE_SALE_DB_USERNAME" type="string" required>
+  Database username for purchase-sale service in production. **No default value.**
+</ParamField>
+
+<ParamField path="PROD_PURCHASE_SALE_DB_PASSWORD" type="string" required>
+  Database password for purchase-sale service in production. **No default value.**
+</ParamField>
+
+## Setting Environment Variables
+
+### Local Development
+
+Create a `.env` file (not committed to git):
+
+```bash
+# .env
+export DEV_AUTH_DB_NAME=auth_dev
+export DEV_AUTH_DB_USERNAME=dev_user
+export DEV_AUTH_DB_PASSWORD=dev_pass
+export SERVICE_INTERNAL_SECRET_KEY=your-secret-key-here
+export SGIVU_GATEWAY_SECRET=gateway-secret-here
+# ... other variables
+```
+
+Source before running:
+```bash
+source .env
+java -jar sgivu-auth.jar --spring.profiles.active=dev
+```
+
+### Docker Compose
+
+```yaml
+version: '3.8'
+services:
+  sgivu-auth:
+    image: sgivu-auth:latest
+    environment:
+      SPRING_PROFILES_ACTIVE: dev
+      DEV_AUTH_DB_HOST: postgres
+      DEV_AUTH_DB_PORT: 5432
+      DEV_AUTH_DB_NAME: auth_dev
+      DEV_AUTH_DB_USERNAME: dev_user
+      DEV_AUTH_DB_PASSWORD: dev_pass
+      SERVICE_INTERNAL_SECRET_KEY: ${SERVICE_INTERNAL_SECRET_KEY}
+      SGIVU_GATEWAY_SECRET: ${SGIVU_GATEWAY_SECRET}
+    env_file:
+      - .env.local  # For sensitive values
+```
+
+### Kubernetes Secrets
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sgivu-common-secrets
+  namespace: production
+type: Opaque
+stringData:
+  SERVICE_INTERNAL_SECRET_KEY: "your-secret-key"
+  SGIVU_GATEWAY_SECRET: "gateway-secret"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: sgivu-auth-db-secrets
+  namespace: production
+type: Opaque
+stringData:
+  PROD_AUTH_DB_NAME: "auth_prod"
+  PROD_AUTH_DB_USERNAME: "auth_user"
+  PROD_AUTH_DB_PASSWORD: "secure-password"
+```
+
+Reference in Deployment:
+
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sgivu-auth
+spec:
+  template:
+    spec:
+      containers:
+      - name: sgivu-auth
+        env:
+        - name: SPRING_PROFILES_ACTIVE
+          value: "prod"
+        envFrom:
+        - secretRef:
+            name: sgivu-common-secrets
+        - secretRef:
+            name: sgivu-auth-db-secrets
+```
+
+### Kubernetes ConfigMap (Non-Sensitive)
+
+```yaml
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: sgivu-common-config
+  namespace: production
+data:
+  EUREKA_URL: "http://eureka-service:8761/eureka"
+  SGIVU_AUTH_URL: "http://sgivu-auth-service:9000"
+  SGIVU_GATEWAY_URL: "http://sgivu-gateway-service:8080"
+  AWS_REGION: "us-east-1"
+  OPENAPI_SERVER_URL: "https://api.sgivu.com"
+```
+
+## Security Best Practices
+
+<CardGroup cols={2}>
+  <Card title="Never Commit Secrets" icon="shield-xmark">
+    Never commit passwords, API keys, or secrets to the config repository or any version control.
+  </Card>
+  
+  <Card title="Use Strong Secrets" icon="lock">
+    Generate cryptographically random secrets with sufficient length (64+ characters for shared secrets).
+  </Card>
+  
+  <Card title="Rotate Regularly" icon="rotate">
+    Implement a rotation schedule for all secrets (quarterly or semi-annually).
+  </Card>
+  
+  <Card title="Principle of Least Privilege" icon="user-shield">
+    Grant services only the permissions they need (database users, IAM roles, etc.).
+  </Card>
+  
+  <Card title="Use Secrets Management" icon="vault">
+    Use dedicated secrets management (Vault, AWS Secrets Manager, etc.) in production.
+  </Card>
+  
+  <Card title="Audit Access" icon="eye">
+    Monitor and log access to secrets and sensitive configuration.
+  </Card>
+</CardGroup>
+
+## Required vs Optional Variables
+
+### Required (No Defaults)
+
+These variables **must** be set or the service will fail to start:
+
+<AccordionGroup>
+  <Accordion title="Security Secrets" icon="key">
+    - `SERVICE_INTERNAL_SECRET_KEY`
+    - `SGIVU_GATEWAY_SECRET`
+    - `JWT_KEYSTORE_LOCATION`
+    - `JWT_KEYSTORE_PASSWORD`
+    - `JWT_KEY_ALIAS`
+    - `JWT_KEY_PASSWORD`
+    - `REDIS_PASSWORD`
+  </Accordion>
+  
+  <Accordion title="Database Credentials" icon="database">
+    All `*_DB_NAME`, `*_DB_USERNAME`, `*_DB_PASSWORD` variables (no defaults)
+  </Accordion>
+  
+  <Accordion title="AWS Configuration" icon="aws">
+    - `AWS_VEHICLES_BUCKET`
+    - `AWS_ACCESS_KEY`
+    - `AWS_SECRET_KEY`
+    - `AWS_REGION`
+  </Accordion>
+  
+  <Accordion title="Application URLs" icon="link">
+    - `DEV_ANGULAR_APP_URL` (dev profile)
+    - `PROD_ANGULAR_APP_URL` (prod profile)
+    - `OPENAPI_SERVER_URL` (prod profile)
+  </Accordion>
+</AccordionGroup>
+
+### Optional (With Defaults)
+
+These variables have sensible defaults for Docker/Kubernetes networking:
+
+- `EUREKA_URL` (default: `http://sgivu-discovery:8761/eureka`)
+- `SGIVU_AUTH_URL` (default: `http://sgivu-auth:9000`)
+- `SGIVU_GATEWAY_URL` (default: `http://sgivu-gateway:8080`)
+- Service URLs (all have Docker service name defaults)
+- `PORT` (each service has a default port)
+- `REDIS_HOST` (default: `sgivu-redis`)
+- `REDIS_PORT` (default: `6379`)
+- Database hosts/ports in dev (default: `host.docker.internal:5432`)
+
+## Validation Checklist
+
+Before deploying, verify all required variables are set:
+
+<Steps>
+  <Step title="List all environment variables">
+    ```bash
+    env | grep -E '(DEV_|PROD_|AWS_|JWT_|SERVICE_|SGIVU_|REDIS_)' | sort
+    ```
+  </Step>
+  
+  <Step title="Check for empty values">
+    ```bash
+    # This should return nothing
+    env | grep -E '(DEV_|PROD_|AWS_|JWT_|SERVICE_|SGIVU_|REDIS_)' | grep '=$'
+    ```
+  </Step>
+  
+  <Step title="Test database connectivity">
+    ```bash
+    psql -h $PROD_AUTH_DB_HOST -p $PROD_AUTH_DB_PORT -U $PROD_AUTH_DB_USERNAME -d $PROD_AUTH_DB_NAME -c '\dt'
+    ```
+  </Step>
+  
+  <Step title="Verify AWS credentials">
+    ```bash
+    aws s3 ls s3://$AWS_VEHICLES_BUCKET --region $AWS_REGION
+    ```
+  </Step>
+  
+  <Step title="Test Redis connection">
+    ```bash
+    redis-cli -h $REDIS_HOST -p $REDIS_PORT -a $REDIS_PASSWORD ping
+    ```
+  </Step>
+</Steps>
+
+## See Also
+
+<CardGroup cols={3}>
+  <Card title="Overview" icon="layer-group" href="/environments/overview">
+    Profile mechanism and configuration merging
+  </Card>
+  
+  <Card title="Dev Environment" icon="flask" href="/environments/dev">
+    Development environment setup
+  </Card>
+  
+  <Card title="Prod Environment" icon="server" href="/environments/prod">
+    Production deployment and security
+  </Card>
+</CardGroup>

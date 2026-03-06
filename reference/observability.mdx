@@ -1,0 +1,634 @@
+---
+title: Observability Configuration
+description: Monitoring, health checks, distributed tracing, and logging configuration in SGIVU
+---
+
+SGIVU implements comprehensive observability through Spring Boot Actuator, Zipkin distributed tracing, and structured logging.
+
+## Actuator Endpoints
+
+Spring Boot Actuator provides production-ready monitoring and management endpoints.
+
+### Endpoint Exposure
+
+<ParamField path="management.endpoints.web.exposure.include" type="string" required>
+  Comma-separated list of actuator endpoints to expose over HTTP. Different profiles expose different endpoints.
+</ParamField>
+
+#### Default Profile (All Services)
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+```
+
+<Info>
+  By default, services only expose `health` and `info` endpoints to minimize the attack surface.
+</Info>
+
+#### Development Profile
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: "*"
+  endpoint:
+    health:
+      show-details: always
+```
+
+<Warning>
+  Development profiles expose all actuator endpoints for debugging. Never use `"*"` in production.
+</Warning>
+
+#### Production Profile
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, prometheus
+```
+
+<Note>
+  Production adds the `prometheus` endpoint for metrics scraping by monitoring systems.
+</Note>
+
+### Exposed Endpoints
+
+<CardGroup cols={2}>
+  <Card title="Health" icon="heart-pulse">
+    `GET /actuator/health`
+    
+    Service health status and readiness checks
+  </Card>
+  <Card title="Info" icon="circle-info">
+    `GET /actuator/info`
+    
+    Application metadata and build information
+  </Card>
+  <Card title="Prometheus" icon="chart-line">
+    `GET /actuator/prometheus`
+    
+    Metrics in Prometheus format (production only)
+  </Card>
+  <Card title="All Endpoints" icon="asterisk">
+    `GET /actuator`
+    
+    Lists all available endpoints (dev only)
+  </Card>
+</CardGroup>
+
+## Health Check Configuration
+
+### Health Details Visibility
+
+<ParamField path="management.endpoint.health.show-details" type="string" required>
+  Controls health check detail visibility. Values: `never`, `when-authorized`, `always`.
+</ParamField>
+
+#### Default and Production
+
+```yaml
+management:
+  endpoint:
+    health:
+      show-details: never
+```
+
+<Info>
+  Services hide health details by default to prevent information leakage. Health endpoint returns only `UP` or `DOWN` status.
+</Info>
+
+#### Development
+
+```yaml
+management:
+  endpoint:
+    health:
+      show-details: always
+```
+
+<Note>
+  Development profiles show full health details including database connectivity, disk space, and other indicators.
+</Note>
+
+### Example Health Responses
+
+#### Production (show-details: never)
+
+```json
+{
+  "status": "UP"
+}
+```
+
+#### Development (show-details: always)
+
+```json
+{
+  "status": "UP",
+  "components": {
+    "db": {
+      "status": "UP",
+      "details": {
+        "database": "PostgreSQL",
+        "validationQuery": "isValid()"
+      }
+    },
+    "diskSpace": {
+      "status": "UP",
+      "details": {
+        "total": 499963174912,
+        "free": 262958080000,
+        "threshold": 10485760
+      }
+    },
+    "ping": {
+      "status": "UP"
+    }
+  }
+}
+```
+
+## Distributed Tracing
+
+SGIVU uses Zipkin for distributed tracing to track requests across microservices.
+
+### Tracing Configuration
+
+<ParamField path="management.tracing.sampling.probability" type="number" required>
+  Percentage of requests to trace (0.0 to 1.0). Set to `0.1` (10%) by default to balance observability with performance.
+</ParamField>
+
+<ParamField path="management.zipkin.tracing.endpoint" type="string" required>
+  Zipkin server endpoint for sending trace data.
+</ParamField>
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+### Sampling Strategy
+
+<Accordion title="Why 10% sampling?">
+  Tracing every request can impact performance and generate massive amounts of data. A 10% sampling rate:
+  
+  - Provides sufficient visibility into system behavior
+  - Captures enough traces to detect patterns and issues
+  - Minimizes performance overhead
+  - Reduces storage requirements
+  
+  Increase the sampling rate to `1.0` (100%) in development for complete visibility.
+</Accordion>
+
+### Service Examples
+
+#### Gateway Service
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+#### Auth Service
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+#### Domain Services (User, Client, Vehicle, Purchase-Sale)
+
+All domain services use identical tracing configuration:
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+## Logging Configuration
+
+SGIVU uses SLF4J with Logback for structured logging.
+
+### Log Levels
+
+<ParamField path="logging.level.root" type="string">
+  Root logger level. Set to `INFO` in all environments for balanced logging.
+</ParamField>
+
+<ParamField path="logging.level.{package}" type="string">
+  Package-specific log levels for fine-grained control.
+</ParamField>
+
+### Standard Configuration
+
+```yaml
+logging:
+  level:
+    root: INFO
+```
+
+### Service-Specific Logging
+
+#### Gateway Service
+
+```yaml
+logging:
+  level:
+    root: INFO
+    com.sgivu.gateway.security: INFO
+    com.sgivu.gateway.controller: INFO
+```
+
+<Info>
+  The Gateway explicitly sets log levels for security and controller packages to ensure authentication/authorization events are captured.
+</Info>
+
+#### Vehicle Service
+
+```yaml
+logging:
+  level:
+    root: INFO
+    software:
+      amazon:
+        awssdk: info
+```
+
+<Note>
+  The Vehicle Service sets AWS SDK logging to `info` to reduce verbosity from S3 operations.
+</Note>
+
+### Log Level Guide
+
+<CardGroup cols={2}>
+  <Card title="ERROR" icon="circle-exclamation">
+    Critical failures requiring immediate attention
+  </Card>
+  <Card title="WARN" icon="triangle-exclamation">
+    Potentially harmful situations that don't stop execution
+  </Card>
+  <Card title="INFO" icon="circle-info">
+    Important runtime events and milestones
+  </Card>
+  <Card title="DEBUG" icon="bug">
+    Detailed diagnostic information (development only)
+  </Card>
+</CardGroup>
+
+## Complete Observability Examples
+
+### Gateway Service
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+
+logging:
+  level:
+    root: INFO
+    com.sgivu.gateway.security: INFO
+    com.sgivu.gateway.controller: INFO
+```
+
+### Auth Service
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+
+logging:
+  level:
+    root: INFO
+```
+
+### User Service
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+
+logging:
+  level:
+    root: INFO
+```
+
+### Client Service
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+
+logging:
+  level:
+    root: INFO
+```
+
+### Vehicle Service
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+
+logging:
+  level:
+    root: INFO
+    software:
+      amazon:
+        awssdk: info
+```
+
+### Purchase-Sale Service
+
+```yaml
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info
+  endpoint:
+    health:
+      show-details: never
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+
+logging:
+  level:
+    root: INFO
+```
+
+## Observability Stack
+
+<Steps>
+  <Step title="Service Instrumentation">
+    Spring Boot Actuator and Micrometer automatically instrument services with metrics, health checks, and trace context propagation.
+  </Step>
+  
+  <Step title="Trace Collection">
+    Sampled requests generate trace spans that are sent to the Zipkin server at `http://sgivu-zipkin:9411`.
+  </Step>
+  
+  <Step title="Metrics Export">
+    Production services expose Prometheus metrics at `/actuator/prometheus` for scraping.
+  </Step>
+  
+  <Step title="Health Monitoring">
+    Orchestrators and load balancers query `/actuator/health` to determine service availability.
+  </Step>
+  
+  <Step title="Log Aggregation">
+    Container logs (stdout/stderr) are collected by the container runtime and can be shipped to centralized logging systems.
+  </Step>
+</Steps>
+
+## Monitoring Best Practices
+
+<Accordion title="Set up health check alerts">
+  Configure your orchestrator (Kubernetes, Docker Swarm, ECS) to:
+  
+  1. Perform health checks on `/actuator/health`
+  2. Set appropriate timeout and interval values
+  3. Restart unhealthy containers automatically
+  4. Alert on repeated health check failures
+  
+  Example Kubernetes liveness probe:
+  ```yaml
+  livenessProbe:
+    httpGet:
+      path: /actuator/health
+      port: 8080
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+  ```
+</Accordion>
+
+<Accordion title="Use Zipkin UI for request tracing">
+  Access the Zipkin UI (typically at `http://localhost:9411`) to:
+  
+  1. Search for traces by service name or time range
+  2. Visualize request flows across services
+  3. Identify performance bottlenecks
+  4. Debug distributed transaction failures
+  5. Analyze service dependencies
+</Accordion>
+
+<Accordion title="Adjust sampling rate based on traffic">
+  **Low traffic environments (< 100 req/min):**
+  ```yaml
+  management:
+    tracing:
+      sampling:
+        probability: 1.0  # Trace 100%
+  ```
+  
+  **Medium traffic environments (100-1000 req/min):**
+  ```yaml
+  management:
+    tracing:
+      sampling:
+        probability: 0.1  # Trace 10%
+  ```
+  
+  **High traffic environments (> 1000 req/min):**
+  ```yaml
+  management:
+    tracing:
+      sampling:
+        probability: 0.01  # Trace 1%
+  ```
+</Accordion>
+
+<Accordion title="Export Prometheus metrics to Grafana">
+  1. Deploy Prometheus to scrape `/actuator/prometheus` endpoints
+  2. Configure Prometheus as a data source in Grafana
+  3. Import Spring Boot dashboards from Grafana.com
+  4. Create custom dashboards for business metrics
+  5. Set up alerting rules in Prometheus/Alertmanager
+</Accordion>
+
+<Accordion title="Implement structured logging">
+  Use structured logging (JSON format) for better log analysis:
+  
+  ```java
+  import org.slf4j.Logger;
+  import org.slf4j.LoggerFactory;
+  
+  Logger log = LoggerFactory.getLogger(UserService.class);
+  
+  // Good: Structured with context
+  log.info("User created: userId={}, email={}", user.getId(), user.getEmail());
+  
+  // Better: With MDC for request tracing
+  MDC.put("userId", user.getId());
+  log.info("User login successful");
+  ```
+  
+  This enables powerful log filtering and analysis in centralized logging systems.
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="Health check endpoint returns 404">
+  **Causes:**
+  - Actuator dependency not included
+  - Endpoints not exposed in configuration
+  - Context path misconfiguration
+  
+  **Solutions:**
+  1. Verify `spring-boot-starter-actuator` is in dependencies
+  2. Check `management.endpoints.web.exposure.include` configuration
+  3. Try full path: `/actuator/health` (not just `/health`)
+</Accordion>
+
+<Accordion title="No traces appearing in Zipkin">
+  **Causes:**
+  - Zipkin server unreachable
+  - Sampling probability too low
+  - Micrometer tracing not configured
+  
+  **Solutions:**
+  1. Verify Zipkin is running: `curl http://sgivu-zipkin:9411/health`
+  2. Increase sampling to `1.0` for testing
+  3. Check service logs for Zipkin connection errors
+  4. Verify `spring-cloud-starter-zipkin` dependency
+</Accordion>
+
+<Accordion title="Too many actuator endpoints exposed in production">
+  **Risk:** Information disclosure and potential security vulnerabilities
+  
+  **Solution:** Ensure production profile uses restricted endpoint exposure:
+  ```yaml
+  management:
+    endpoints:
+      web:
+        exposure:
+          include: health, info, prometheus
+  ```
+  
+  Never use `include: "*"` in production.
+</Accordion>
+
+<Accordion title="High CPU usage from tracing">
+  **Cause:** Sampling probability too high for traffic volume
+  
+  **Solution:** Reduce sampling probability:
+  ```yaml
+  management:
+    tracing:
+      sampling:
+        probability: 0.01  # 1% instead of 10%
+  ```
+  
+  Monitor CPU usage after adjustment.
+</Accordion>
+
+## Related Configuration
+
+<CardGroup cols={2}>
+  <Card title="Spring Configuration" icon="leaf" href="/reference/spring-configuration">
+    Server and application settings
+  </Card>
+  <Card title="Environment Variables" icon="code" href="/environments/variables">
+    Observability-related environment variables
+  </Card>
+  <Card title="Deployment" icon="rocket" href="/getting-started/local-development">
+    Zipkin and monitoring stack deployment
+  </Card>
+  <Card title="Service Architecture" icon="sitemap" href="/architecture">
+    How observability fits into the system
+  </Card>
+</CardGroup>

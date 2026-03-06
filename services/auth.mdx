@@ -1,0 +1,398 @@
+---
+title: Auth Service Configuration
+description: OAuth2 Authorization Server configuration for the SGIVU platform
+---
+
+The Auth Service (`sgivu-auth`) is the OAuth2/OpenID Connect authorization server that handles authentication and token issuance for the entire SGIVU platform.
+
+## Service Overview
+
+<CardGroup cols={2}>
+  <Card title="Port" icon="network-wired">
+    9000
+  </Card>
+  <Card title="Database" icon="database">
+    PostgreSQL
+  </Card>
+  <Card title="Session Store" icon="table">
+    JDBC (PostgreSQL)
+  </Card>
+  <Card title="Role" icon="shield-halved">
+    OAuth2 Authorization Server
+  </Card>
+</CardGroup>
+
+## Key Features
+
+- OAuth2 Authorization Server with Spring Authorization Server
+- JWT token generation using keystore-based signing
+- Session management with JDBC persistence
+- User authentication and authorization
+- Integration with User Service for user data
+- Database migration with Flyway
+
+## Base Configuration
+
+### Server Settings
+
+```yaml
+server:
+  port: ${PORT:9000}
+  forward-headers-strategy: framework
+```
+
+<Info>
+The `forward-headers-strategy: framework` enables proper handling of proxy headers from the gateway.
+</Info>
+
+### Session Management
+
+The auth service uses JDBC-based session storage:
+
+```yaml
+spring:
+  session:
+    store-type: jdbc
+    jdbc:
+      initialize-schema: never
+      table-name: SPRING_SESSION
+      cleanup-cron: 0 */15 * * * *
+      flush-mode: on_save
+      save-mode: on_get_attribute
+```
+
+<Accordion title="Session Configuration Details">
+- **store-type: jdbc** - Sessions stored in PostgreSQL
+- **cleanup-cron: 0 */15 * * * *** - Cleans expired sessions every 15 minutes
+- **flush-mode: on_save** - Writes to database only when explicitly saved
+- **save-mode: on_get_attribute** - Session saved when attributes are accessed
+</Accordion>
+
+### JWT Configuration
+
+The service uses a keystore to sign JWT tokens:
+
+```yaml
+sgivu:
+  jwt:
+    keystore:
+      location: ${JWT_KEYSTORE_LOCATION}
+      password: ${JWT_KEYSTORE_PASSWORD}
+    key:
+      alias: ${JWT_KEY_ALIAS}
+      password: ${JWT_KEY_PASSWORD}
+```
+
+<Warning>
+These credentials must be kept secure and never committed to source control. Use environment variables or secure secret management.
+</Warning>
+
+### Issuer Configuration
+
+```yaml
+issuer:
+  url: ${ISSUER_URL:http://sgivu-auth:9000}
+```
+
+This URL is used in JWT tokens as the `iss` claim and must be accessible by all services.
+
+## Database Configuration
+
+### JPA Settings
+
+```yaml
+spring:
+  jpa:
+    open-in-view: false
+```
+
+<Note>
+`open-in-view: false` prevents lazy loading issues by ensuring all database operations occur within transaction boundaries.
+</Note>
+
+### Flyway Migration
+
+```yaml
+spring:
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    baseline-version: 0
+    validate-on-migrate: true
+```
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://${DEV_AUTH_DB_HOST:host.docker.internal}:${DEV_AUTH_DB_PORT:5432}/${DEV_AUTH_DB_NAME}
+        username: ${DEV_AUTH_DB_USERNAME}
+        password: ${DEV_AUTH_DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+        show-sql: true
+        properties:
+          hibernate:
+            format_sql: true
+      flyway:
+        baseline-on-migrate: true
+        clean-disabled: false
+    ```
+    
+    Development enables SQL logging and allows Flyway clean operations for testing.
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    spring:
+      datasource:
+        url: jdbc:postgresql://${PROD_AUTH_DB_HOST:host.docker.internal}:${PROD_AUTH_DB_PORT:5432}/${PROD_AUTH_DB_NAME}
+        username: ${PROD_AUTH_DB_USERNAME}
+        password: ${PROD_AUTH_DB_PASSWORD}
+        driver-class-name: org.postgresql.Driver
+      jpa:
+        hibernate:
+          ddl-auto: validate
+      flyway:
+        clean-disabled: true
+        baseline-on-migrate: ${FLYWAY_BASELINE_ON_MIGRATE:false}
+    ```
+    
+    Production disables SQL logging and prevents Flyway clean operations for safety.
+  </Tab>
+</Tabs>
+
+## Service Integration
+
+### Eureka Registration
+
+```yaml
+eureka:
+  instance:
+    instance-id: ${spring.cloud.client.hostname}:${spring.application.name}:${random.value}
+  client:
+    service-url:
+      defaultZone: ${EUREKA_URL:http://sgivu-discovery:8761/eureka}
+```
+
+### Service Discovery Map
+
+```yaml
+services:
+  map:
+    sgivu-user:
+      name: sgivu-user
+      url: ${SGIVU_USER_URL:http://sgivu-user:8081}
+```
+
+The auth service communicates with the User Service to retrieve user details during authentication.
+
+### Gateway Client Configuration
+
+```yaml
+gateway-client:
+  url: ${SGIVU_GATEWAY_URL:http://sgivu-gateway:8080}
+  secret: ${SGIVU_GATEWAY_SECRET}
+```
+
+This configuration defines the OAuth2 client credentials for the gateway.
+
+## Security Configuration
+
+### Internal Service Authentication
+
+```yaml
+service:
+  internal:
+    secret-key: ${SERVICE_INTERNAL_SECRET_KEY}
+```
+
+This shared secret authenticates internal service-to-service API calls.
+
+## Session Configuration
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    spring:
+      session:
+        timeout: 2h
+    ```
+    
+    Development sessions last 2 hours for convenience.
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    spring:
+      session:
+        timeout: 2h
+    ```
+    
+    Production also uses 2-hour sessions with automatic cleanup.
+  </Tab>
+</Tabs>
+
+## Client Configuration
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    angular-client:
+      url: ${DEV_ANGULAR_APP_URL}
+    ```
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    angular-client:
+      url: ${PROD_ANGULAR_APP_URL}
+    ```
+  </Tab>
+</Tabs>
+
+Defines the allowed redirect URIs for the Angular frontend application.
+
+## Observability
+
+### Actuator Endpoints
+
+<Tabs>
+  <Tab title="Development">
+    ```yaml
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: "*"
+      endpoint:
+        health:
+          show-details: always
+    ```
+    
+    All actuator endpoints exposed for debugging.
+  </Tab>
+  <Tab title="Production">
+    ```yaml
+    management:
+      endpoints:
+        web:
+          exposure:
+            include: health, info, prometheus
+      endpoint:
+        health:
+          show-details: never
+    ```
+    
+    Limited endpoints exposed for security.
+  </Tab>
+</Tabs>
+
+### Distributed Tracing
+
+```yaml
+management:
+  tracing:
+    sampling:
+      probability: 0.1
+  zipkin:
+    tracing:
+      endpoint: http://sgivu-zipkin:9411/api/v2/spans
+```
+
+<Info>
+Samples 10% of requests to reduce overhead while maintaining visibility into system behavior.
+</Info>
+
+### Logging
+
+```yaml
+logging:
+  level:
+    root: INFO
+```
+
+## API Documentation
+
+```yaml
+springdoc:
+  swagger-ui:
+    url: /docs/auth/v3/api-docs
+    configUrl: /docs/auth/v3/api-docs/swagger-config
+```
+
+<Tabs>
+  <Tab title="Production">
+    ```yaml
+    openapi:
+      server:
+        url: ${OPENAPI_SERVER_URL}
+    ```
+    
+    Production overrides the server URL for public API documentation.
+  </Tab>
+</Tabs>
+
+## Required Environment Variables
+
+### All Environments
+
+| Variable | Description | Example |
+|----------|-------------|----------|
+| `SERVICE_INTERNAL_SECRET_KEY` | Shared secret for internal APIs | `your-secret-key` |
+| `JWT_KEYSTORE_LOCATION` | Path to JWT keystore | `classpath:keystore.jks` |
+| `JWT_KEYSTORE_PASSWORD` | Keystore password | `changeit` |
+| `JWT_KEY_ALIAS` | Key alias in keystore | `sgivu-jwt` |
+| `JWT_KEY_PASSWORD` | Key password | `changeit` |
+| `SGIVU_GATEWAY_SECRET` | Gateway OAuth2 client secret | `gateway-secret` |
+
+### Development
+
+| Variable | Description |
+|----------|-------------|
+| `DEV_AUTH_DB_HOST` | Database host |
+| `DEV_AUTH_DB_PORT` | Database port |
+| `DEV_AUTH_DB_NAME` | Database name |
+| `DEV_AUTH_DB_USERNAME` | Database username |
+| `DEV_AUTH_DB_PASSWORD` | Database password |
+| `DEV_ANGULAR_APP_URL` | Angular app URL |
+
+### Production
+
+| Variable | Description |
+|----------|-------------|
+| `PROD_AUTH_DB_HOST` | Database host |
+| `PROD_AUTH_DB_PORT` | Database port |
+| `PROD_AUTH_DB_NAME` | Database name |
+| `PROD_AUTH_DB_USERNAME` | Database username |
+| `PROD_AUTH_DB_PASSWORD` | Database password |
+| `PROD_ANGULAR_APP_URL` | Angular app URL |
+| `OPENAPI_SERVER_URL` | Public API docs URL |
+
+### Optional
+
+| Variable | Description | Default |
+|----------|-------------|----------|
+| `PORT` | Service port | `9000` |
+| `EUREKA_URL` | Eureka server URL | `http://sgivu-discovery:8761/eureka` |
+| `ISSUER_URL` | JWT issuer URL | `http://sgivu-auth:9000` |
+| `SGIVU_USER_URL` | User service URL | `http://sgivu-user:8081` |
+| `FLYWAY_BASELINE_ON_MIGRATE` | Baseline existing DB | `false` |
+
+## Configuration Files
+
+- `sgivu-auth.yml` - Base configuration
+- `sgivu-auth-dev.yml` - Development overrides
+- `sgivu-auth-prod.yml` - Production overrides
+
+## Related Services
+
+<CardGroup cols={2}>
+  <Card title="Gateway Service" icon="door-open" href="/services/gateway">
+    OAuth2 client configuration
+  </Card>
+  <Card title="User Service" icon="user" href="/services/user">
+    User data provider
+  </Card>
+</CardGroup>
