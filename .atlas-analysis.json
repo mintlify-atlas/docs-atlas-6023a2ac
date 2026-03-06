@@ -1,0 +1,104 @@
+{
+  "projectType": "infrastructure",
+  "projectName": "SGIVU Config Repository",
+  "projectDescription": "Centralized Spring Cloud Config repository managing YAML configurations for SGIVU microservices across environments",
+  "theme": "aspen",
+  "primaryColor": "#0ea5e9",
+  "lightColor": "#38bdf8",
+  "darkColor": "#0284c7",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "introduction",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Getting Started",
+            "pages": [
+              "getting-started/setup",
+              "getting-started/local-development"
+            ]
+          },
+          {
+            "group": "Service Configuration",
+            "pages": [
+              "services/overview",
+              "services/auth",
+              "services/gateway",
+              "services/discovery",
+              "services/user",
+              "services/client",
+              "services/vehicle",
+              "services/purchase-sale"
+            ]
+          },
+          {
+            "group": "Environment Management",
+            "pages": [
+              "environments/overview",
+              "environments/dev",
+              "environments/prod",
+              "environments/variables"
+            ]
+          },
+          {
+            "group": "Operations",
+            "pages": [
+              "operations/security",
+              "operations/monitoring",
+              "operations/refresh",
+              "operations/validation"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Configuration Reference",
+        "groups": [
+          {
+            "group": "Common Patterns",
+            "pages": [
+              "reference/spring-configuration",
+              "reference/eureka-settings",
+              "reference/database-config",
+              "reference/observability"
+            ]
+          },
+          {
+            "group": "Best Practices",
+            "pages": [
+              "best-practices/secret-management",
+              "best-practices/yaml-structure",
+              "best-practices/version-control"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Centralized configuration management for Spring Cloud microservices",
+    "Multi-environment support (default, dev, prod)",
+    "OAuth2 authentication and authorization setup",
+    "Eureka service discovery configuration",
+    "Database migrations with Flyway",
+    "Distributed tracing with Zipkin",
+    "Secret management with environment variables"
+  ],
+  "publicApiSurface": [
+    "sgivu-auth.yml - OAuth2 authorization server configuration",
+    "sgivu-gateway.yml - API gateway and session management",
+    "sgivu-discovery.yml - Eureka service registry settings",
+    "sgivu-user.yml - User service database and API config",
+    "sgivu-client.yml - Client service configuration",
+    "sgivu-vehicle.yml - Vehicle service with AWS S3 integration",
+    "sgivu-purchase-sale.yml - Purchase/sale service orchestration",
+    "Environment-specific overrides with -dev.yml and -prod.yml suffixes"
+  ]
+}
